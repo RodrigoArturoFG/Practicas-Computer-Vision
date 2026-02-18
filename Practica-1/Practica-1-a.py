@@ -1,0 +1,1 @@
+# Practica 1-a). "Creando mi mapa de calor"
