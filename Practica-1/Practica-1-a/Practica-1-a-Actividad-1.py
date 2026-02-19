@@ -4,13 +4,15 @@ import cv2
 import matplotlib.pyplot as plt
 import os
 
-
+# Se obtiene el directorio del script para cargar la imagen de manera absoluta
 script_dir = os.path.dirname(os.path.abspath(__file__))
-print("Directorio del script:", script_dir) # Intenta cargar la imagen 
+print("Directorio del script:", script_dir) 
 
-imagen_path = os.path.join(script_dir, 'rostro-humano.jpg')
+# Se obtine la ruta completa de la imagen
+imagen_path = os.path.join(script_dir, 'resources/rostro-humano.jpg')
 print("Ruta de la imagen:", imagen_path)
 
+# Cargar la imagen en escala de grises
 imagen_gris = cv2.imread(imagen_path, cv2.IMREAD_GRAYSCALE) 
 
 if imagen_gris is None: 
