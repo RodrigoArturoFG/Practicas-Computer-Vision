@@ -135,7 +135,7 @@ def menu_mapas_color(imagen_gris):
         print("\n=== Menú de Mapas de Color Disponibles ===")
         for i, nombre in enumerate(mapas_color.keys(), start=1):
             print(f"{i}. {nombre}")
-        print(f"{len(mapas_color)+1}. REGRESAR AL MENÚ PRINCIPAL")
+        print(f"{len(mapas_color)+1}. Regresar al Menú Principal [Regresar, Salir]")
 
         opcion_usuario = input("Selecciona un mapa de color por nombre o número: ").strip()
 
@@ -143,7 +143,7 @@ def menu_mapas_color(imagen_gris):
         if opcion_usuario.isdigit():
             indice = int(opcion_usuario) - 1
             if indice == len(mapas_color):
-                print("Regresando al menú principal...")
+                print("Regresando al Menú Principal...")
                 break
             elif 0 <= indice < len(mapas_color):
                 opcion_usuario = list(mapas_color.keys())[indice]
@@ -151,7 +151,7 @@ def menu_mapas_color(imagen_gris):
                 print("Número fuera de rango.")
                 continue
         elif opcion_usuario.upper() in ["REGRESAR", "SALIR"]:
-            print("Regresando al menú principal...")
+            print("Regresando al Menú Principal...")
             break
 
         try:
@@ -179,10 +179,10 @@ def menu_principal():
 
     while True:
         print("\n=== MENÚ PRINCIPAL ===")
-        print("1. Mapas de Color Disponibles")
-        print("2. Comparación Visual de Mapas de Color")
-        print("3. Salir del programa")
-        opcion = input("Selecciona una opción: ").strip()
+        print("1. Aplicar un Mapa de Color a la Imagen en Escala de Grises")
+        print("2. Comparación Visual de Mapas de Color Disponibles en OpenCV")
+        print("3. Salir del Programa")
+        opcion = input("Selecciona una Opción: ").strip()
 
         if opcion == "1":
             menu_mapas_color(imagen_gris)
