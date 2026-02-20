@@ -26,6 +26,9 @@ def comparar_mapas_color(imagen_gris):
     Muestra la imagen en escala de grises y todas las versiones pseudocoloreadas disponibles.
     Organizando la cuadrícula de manera dinámica según la cantidad de paletas de OpenCV detectadas.
     """
+    print("Creando imagenes con pseudocolor con todos los mapas de color disponibles en OpenCV...")
+    
+    # Obtener la lista de nombres de colormaps disponibles
     nombres_colormaps = list(mapas_color.keys())
     n_colormaps = len(nombres_colormaps)
     total_imgs = n_colormaps + 1  # +1 para la imagen en escala de grises
@@ -34,6 +37,7 @@ def comparar_mapas_color(imagen_gris):
     n_cols = min(5, total_imgs)  # máximo 5 columnas para mejor visualización
     n_rows = int(np.ceil(total_imgs / n_cols))
 
+    # Crear la figura y los ejes para la cuadrícula
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 5*n_rows))
     axs = np.array(axs).reshape(-1)  # aplanar para indexar fácilmente
 
@@ -42,7 +46,7 @@ def comparar_mapas_color(imagen_gris):
     axs[0].set_title('Escala de grises')
     axs[0].axis('off')
 
-    # Mostrar cada pseudocolor
+    # Agregar cada pseudocolor en la cuadrícula y el título correspondiente
     for idx, nombre in enumerate(nombres_colormaps):
         pseudocolor = ImagenPseudocolor.aplicar_pseudocolor(imagen_gris, nombre)
         axs[idx+1].imshow(cv2.cvtColor(pseudocolor.imagen, cv2.COLOR_BGR2RGB))
@@ -56,11 +60,14 @@ def comparar_mapas_color(imagen_gris):
     # Ajustar el layout para evitar recortes y superposiciones
     plt.tight_layout(rect=[0, 0, 1, 1])
     plt.subplots_adjust(bottom=0.03, top=0.97, left=0.03, right=0.97, hspace=0.25, wspace=0.15)
+
     # Guardar la figura antes de mostrarla, sin elementos extra
+    # El nombre del archivo incluye la fecha y hora para evitar sobreescrituras
     nombre_archivo = f"comparacion_mapas_color_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
     ruta_carpeta = os.path.join(script_dir, 'resources/pseudocolor')
     os.makedirs(ruta_carpeta, exist_ok=True)
     ruta_imagen = os.path.join(ruta_carpeta, nombre_archivo)
+    # Guardar la figura con un pequeño margen para evitar recortes de títulos o bordes
     fig.savefig(ruta_imagen, bbox_inches='tight', pad_inches=0.05)
     print(f"Comparación guardada en: {ruta_imagen}")
 
@@ -110,12 +117,15 @@ def seleccionar_imagen():
     Permite al usuario seleccionar una imagen de la carpeta resources/input.
     Actualiza la variable global imagen_path.
     """
+    # Obtener la lista de archivos en la carpeta de entrada
     global imagen_path
     carpeta_input = os.path.join(script_dir, 'resources/input')
     archivos = [f for f in os.listdir(carpeta_input) if os.path.isfile(os.path.join(carpeta_input, f))]
     if not archivos:
         print("No se encontraron imágenes en la carpeta resources/input.")
         return
+    
+    # Mostrar el menú de selección de imagen
     print("\n=== Selección de Imagen ===")
     for i, nombre in enumerate(archivos, start=1):
         print(f"{i}. {nombre}")
@@ -128,6 +138,7 @@ def seleccionar_imagen():
                 print("Selección cancelada.")
                 return
             elif 0 <= idx < len(archivos):
+                # Actualizar la ruta de la imagen seleccionada
                 imagen_path = os.path.join(carpeta_input, archivos[idx])
                 print(f"Imagen seleccionada: {imagen_path}")
                 return
