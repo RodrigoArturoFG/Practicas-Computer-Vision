@@ -106,9 +106,9 @@ def menu_mapas_color(imagen_gris):
 
         try:
             resultado = ImagenPseudocolor.aplicar_pseudocolor(imagen_gris, opcion_usuario)
-            resultado.mostrar()
+            resultado.mostrar(imagen_gris)
             image_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            ruta_guardada = resultado.guardar(image_name)
+            ruta_guardada = resultado.guardar(image_name, imagen_gris)
             print(f"Imagen guardada en: {ruta_guardada}")
             pausa = input("Presiona Enter para continuar...")
         except ValueError as e:
@@ -220,7 +220,6 @@ def menu_principal():
             imagen_gris = cv2.imread(imagen_path, cv2.IMREAD_GRAYSCALE)
             if imagen_gris is None:
                 raise FileNotFoundError("No se pudo cargar la imagen. Verifica la ruta y extensión.")
-                
             menu_mapas_color(imagen_gris)
         elif opcion == "3":
             imagen_gris = cv2.imread(imagen_path, cv2.IMREAD_GRAYSCALE)

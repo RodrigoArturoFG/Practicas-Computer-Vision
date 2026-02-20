@@ -41,38 +41,53 @@ class ImagenPseudocolor:
         # Retorna una instancia de la clase aplicando el mapa de color seleccionado
         return cls(imagen_gris, opcion)
 
-    def mostrar(self) -> None:
+    def mostrar(self, imagen_gris: np.ndarray = None) -> None:
         """
-        Método auxiliar para visualizar la imagen pseudocolor con matplotlib.
-        Usa el atributo 'nombre' como título de la figura.
+        Visualiza la imagen pseudocolor sola o junto con la imagen en escala de grises si se proporciona.
+        Si imagen_gris es None, solo muestra la pseudocolor.
         """
-        # Convertir la imagen de BGR a RGB para mostrarla correctamente con matplotlib
-        plt.imshow(cv2.cvtColor(self.imagen, cv2.COLOR_BGR2RGB))
-        plt.title(f"Pseudocolor: {self.nombre}")
-        plt.axis("off")
+        if imagen_gris is not None:
+            fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+            axs[0].imshow(imagen_gris, cmap='gray')
+            axs[0].set_title('Imagen en escala de grises')
+            axs[0].axis('off')
+            axs[1].imshow(cv2.cvtColor(self.imagen, cv2.COLOR_BGR2RGB))
+            axs[1].set_title(f'Pseudocolor: {self.nombre}')
+            axs[1].axis('off')
+        else:
+            fig, ax = plt.subplots(figsize=(5, 5))
+            ax.imshow(cv2.cvtColor(self.imagen, cv2.COLOR_BGR2RGB))
+            ax.set_title(f'Pseudocolor: {self.nombre}')
+            ax.axis('off')
+        plt.tight_layout()
         plt.show()
     
-    def guardar(self, ruta_base: str = "resultado") -> str:
+    def guardar(self, ruta_base: str = "resultado", imagen_gris: np.ndarray = None) -> str:
         """
-        Método auxiliar para guardar la imagen pseudocolor en disco.
+        Guarda la imagen pseudocolor sola o junto con la imagen en escala de grises si se proporciona.
+        Si imagen_gris es None, solo guarda la pseudocolor.
         El archivo se nombra automáticamente con el colormap seleccionado.
-        
-        Parámetros:
-            ruta_base (str): Nombre base del archivo (sin extensión).
-        
-        Retorna:
-            str: Ruta completa del archivo guardado.
+        Retorna la ruta completa del archivo guardado.
         """
-        # Construir el nombre del archivo utilizando el nombre del mapa de color y la ruta base proporcionada
+        if imagen_gris is not None:
+            fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+            axs[0].imshow(imagen_gris, cmap='gray')
+            axs[0].set_title('Imagen en escala de grises')
+            axs[0].axis('off')
+            axs[1].imshow(cv2.cvtColor(self.imagen, cv2.COLOR_BGR2RGB))
+            axs[1].set_title(f'Pseudocolor: {self.nombre}')
+            axs[1].axis('off')
+        else:
+            fig, ax = plt.subplots(figsize=(5, 5))
+            ax.imshow(cv2.cvtColor(self.imagen, cv2.COLOR_BGR2RGB))
+            ax.set_title(f'Pseudocolor: {self.nombre}')
+            ax.axis('off')
+        plt.tight_layout()
+
         nombre_imagen = f"{ruta_base}_{self.nombre}.png"
         ruta_carpeta = os.path.join(script_dir, 'resources/pseudocolor')
-
-        # Crear la carpeta si no existe
         os.makedirs(ruta_carpeta, exist_ok=True)
-
-        # Construir la ruta completa del archivo y guardar la imagen utilizando OpenCV
         ruta_imagen = os.path.join(ruta_carpeta, nombre_imagen)
-        cv2.imwrite(ruta_imagen, self.imagen)
-
-        # Retornar la ruta completa del archivo guardado para referencia futura
+        fig.savefig(ruta_imagen, bbox_inches='tight', pad_inches=0.05)
+        plt.close(fig)
         return ruta_imagen
