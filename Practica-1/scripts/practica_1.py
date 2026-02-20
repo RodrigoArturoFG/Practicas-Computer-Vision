@@ -11,13 +11,14 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
 # Importar elementos locales
+from imagen_pseudocolor import ImagenPseudocolor  # Importar la clase ImagenPseudocolor
 from config import mapas_color # Importar el diccionario de mapas de color desde config.py
 from config import script_dir  # Importar la variable script_dir desde config.py
-from imagen_pseudocolor import ImagenPseudocolor  # Importar la clase ImagenPseudocolor
+from config import colores_pastel, colores_tierra, colores_pastel_personalizados # Importar las listas de colores personalizados desde config.py
 
 
 # --------- VARIABLES GLOBALES ---------
-imagen_path = os.path.join(script_dir, 'resources/input/rostro_humano.jpg')
+imagen_path = os.path.join(script_dir, 'resources\\input\\rostro_humano.jpg')
 
 # --------- FUNCIONES DE PROCESAMIENTO DE IMAGENES ---------
 def comparar_mapas_color(imagen_gris):
@@ -125,27 +126,10 @@ def mostrar_personalizacion_mapas(imagen_gris):
     # Cada fila tiene valores de 0 a 255 en forma de gradiente
     # imagen_gris = np.tile(np.linspace(0, 255, 256), (100,1)).astype(np.uint8)
 
-    # Definir colores pastel en formato RGB normalizado (valores entre 0 y 1)
-    colores_pastel = [
-        (1.0, 0.8, 0.9), # rosa claro
-        (0.8, 1.0, 0.8), # verde menta
-        (0.8, 0.9, 1.0), # azul lavanda
-        (1.0, 1.0, 0.8), # amarillo suave
-        (0.9, 0.8, 1.0) # violeta claro
-    ]
-
-    # Definir colores tierra en formato RGB normalizado (valores entre 0 y 1)
-    colores_tierra = [
-        (0.6, 0.4, 0.2), # marrón oscuro
-        (0.8, 0.7, 0.5), # marrón claro
-        (0.9, 0.8, 0.6), # beige
-        (0.7, 0.5, 0.3), # marrón medio
-        (0.5, 0.3, 0.1) # marrón muy oscuro
-    ]
-
     # Crear los mapas de color personalizados utilizando LinearSegmentedColormap
     mapa_pastel = LinearSegmentedColormap.from_list("PastelMap", colores_pastel, N=256)
     mapa_tierra = LinearSegmentedColormap.from_list("TierraMap", colores_tierra, N=256)
+    mapa_pastel_personalizado = LinearSegmentedColormap.from_list("PastelPersonalizadoMap", colores_pastel_personalizados, N=256)
 
     # Visualizar la imagen original y la imagen con pseudocolor pastel y tierra
     fig, axs = plt.subplots(2, 2, figsize=(10, 8))
@@ -163,6 +147,8 @@ def mostrar_personalizacion_mapas(imagen_gris):
     axs[2].set_title('Mapa de color tierra')
     axs[2].axis('off')
 
+    axs[3].imshow(imagen_gris, cmap=mapa_pastel_personalizado)
+    axs[3].set_title('Mapa de color pastel personalizado')
     axs[3].axis('off')
 
     plt.tight_layout()
