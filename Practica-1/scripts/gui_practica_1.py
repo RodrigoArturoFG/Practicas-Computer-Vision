@@ -1,3 +1,8 @@
+# --------- PRACTICA 1 "CREANDO MI MAPA DE CALOR" ---------
+# --------- GUI PRINCIPAL PARA LA PRÁCTICA 1 --------------
+# Autor: Rodrigo Arturo Fernández González
+# Fecha: 02-19-2026
+
 import os
 import sys
 import cv2
@@ -5,25 +10,108 @@ import numpy as np
 import datetime
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QFileDialog,
-    QVBoxLayout, QWidget, QComboBox, QStyledItemDelegate, QMessageBox, 
-    QSpacerItem, QSizePolicy
+    QVBoxLayout, QWidget, QComboBox, QStyledItemDelegate, 
+    QMessageBox, QSizePolicy, QProgressDialog
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QGuiApplication
+from PyQt5.QtCore import Qt, QEvent, QThread, pyqtSignal, QTimer
+from PyQt5.QtGui import QGuiApplication, QFont
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.colors import LinearSegmentedColormap
 
 # Módulos propios
-from config import script_dir, mapas_color, colores_pastel, colores_tierra, colores_pastel_personalizados
-from practica_1 import comparar_mapas_color
+from config import (
+    script_dir, mapas_color, colores_pastel, colores_tierra, 
+    colores_pastel_personalizados, nombre_fuente, tamano_fuente
+)
 from imagen_pseudocolor import ImagenPseudocolor
+
+class WorkerApplyColormap(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(tuple)  # (imagen_gris, colormap_name)
+    done = pyqtSignal() # nueva señal para indicar que el proceso ha terminado completamente
+
+    def __init__(self, imagen_gris, colormap_name, parent=None):
+        super().__init__(parent)
+        self.imagen_gris = imagen_gris
+        self.colormap_name = colormap_name
+
+    def run(self):
+        # Simular progreso inicial 0–30
+        for p in range(0, 21, 5):
+            self.progress.emit(p)
+            #self.msleep(5)  # 50 ms de pausa para que se vea fluido
+
+        # Procesamiento real
+        resultado = ImagenPseudocolor.aplicar_pseudocolor(self.imagen_gris, self.colormap_name)
+
+        # Emitir resultado
+        self.finished.emit((self.imagen_gris, self.colormap_name))
+
+        # Simular progreso final 70–100
+        for p in range(21, 105, 5):
+            self.progress.emit(p)
+            #self.msleep(5)
+        
+        self.done.emit() # aquí sí se cierra el loader
+
+class WorkerCustomizeColormap(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(object)  # imagen_gris
+
+    def __init__(self, imagen_gris, parent=None):
+        super().__init__(parent)
+        self.imagen_gris = imagen_gris
+
+    def run(self):
+        # Progreso inicial
+        self.progress.emit(30)
+        # Aquí no hay cálculo pesado, solo pasamos la imagen
+        self.progress.emit(70)
+        self.finished.emit(self.imagen_gris)
+        # Progreso final
+        self.progress.emit(100)
+
+class WorkerCompareColorMap(QThread):
+    progress = pyqtSignal(int)   # porcentaje
+    finished = pyqtSignal(list)
+
+    def __init__(self, imagen_gris, parent=None):
+        super().__init__(parent)
+        self.imagen_gris = imagen_gris
+
+    def run(self):
+        resultados = []
+        nombres_colormaps = list(mapas_color.keys())
+        total = len(nombres_colormaps)
+        for idx, nombre in enumerate(nombres_colormaps):
+            pseudocolor = ImagenPseudocolor.aplicar_pseudocolor(self.imagen_gris, nombre)
+            resultados.append((nombre, pseudocolor.imagen))
+            progreso = int((idx+1)/total * 20) # hasta 20%
+            self.progress.emit(progreso)  # actualizar loader
+        self.finished.emit(resultados)
 
 
 class CenteredComboBoxDelegate(QStyledItemDelegate):
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
         option.displayAlignment = Qt.AlignCenter
+
+class ClickableComboBox(QComboBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        le = self.lineEdit()
+        le.setAlignment(Qt.AlignCenter)
+        le.setReadOnly(True)
+        # Instalar filtro de eventos en el lineEdit
+        le.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if obj == self.lineEdit() and event.type() == QEvent.MouseButtonPress:
+            self.showPopup()
+            return True  # consumir el evento
+        return super().eventFilter(obj, event)
 
 
 class Practica1GUI(QMainWindow):
@@ -34,137 +122,201 @@ class Practica1GUI(QMainWindow):
     def show_info(self, message: str):
         QMessageBox.information(self, "Información", message)
 
+    def show_loader(self, message="Procesando...", title="Cargando"):
+        # Crear el diálogo solo cuando se necesite y configurarlo para mostrar progreso real
+        self.progress_dialog = QProgressDialog(message, None, 0, 100, self)
+        self.progress_dialog.setWindowTitle(title)
+        self.progress_dialog.setWindowModality(Qt.ApplicationModal)
+        self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.show()
+
+    def hide_loader(self):
+        if self.progress_dialog is not None:
+            self.progress_dialog.hide()
+            self.progress_dialog = None  # liberar referencia
+
+
     def mostrar_pseudocolor(self, imagen_gris, colormap_name):
         try:
             resultado = ImagenPseudocolor.aplicar_pseudocolor(imagen_gris, colormap_name)
+
+            # Limpiar figura y retícula
             self.figure.clear()
             axs = self.figure.subplots(1, 2)
+
+            # Imagen en escala de grises
             axs[0].imshow(imagen_gris, cmap='gray')
-            axs[0].set_title('Imagen en escala de grises')
+            axs[0].set_title('Imagen en escala de grises', fontname=nombre_fuente, fontsize=tamano_fuente*2)
             axs[0].axis('off')
+            axs[0].set_aspect('equal')
+
+            # Imagen pseudocolor
             axs[1].imshow(cv2.cvtColor(resultado.imagen, cv2.COLOR_BGR2RGB))
-            axs[1].set_title(f'Pseudocolor: {colormap_name}')
+            axs[1].set_title(f'Pseudocolor: {colormap_name}', fontname=nombre_fuente, fontsize=tamano_fuente*2)
             axs[1].axis('off')
-            self.figure.tight_layout()
+            axs[1].set_aspect('equal')
+
+            # Ajustar márgenes manualmente (sin tamaño fijo de figura)
+            self.figure.subplots_adjust(
+                left=0.05, right=0.95, top=0.90, bottom=0.05,
+                wspace=0.3, hspace=0.3
+            )
+
+            # Render estable
             self.canvas.draw()
 
             # Guardado diferido
             self.last_processed_image = resultado.imagen
             self.last_action = "pseudocolor"
 
-            # Definir ruta para la figura actual (comparación)
-            nombre_archivo_comp = f"comparacion_pseudocolor_{colormap_name}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
             ruta_carpeta = os.path.join(script_dir, 'resources/pseudocolor')
             os.makedirs(ruta_carpeta, exist_ok=True)
-            self.ruta_imagen_comp = os.path.join(ruta_carpeta, nombre_archivo_comp)
+
+            self.ruta_imagen_proc = os.path.join(ruta_carpeta, f"imagen_procesada_{colormap_name}_{timestamp}.png")
+            self.ruta_imagen_comp = os.path.join(ruta_carpeta, f"comparacion_pseudocolor_{colormap_name}_{timestamp}.png")
 
         except ValueError as e:
             self.show_error(str(e))
 
     def mostrar_personalizacion_mapas_gui(self, imagen_gris):
+        # Crear colormaps personalizados
         mapa_pastel = LinearSegmentedColormap.from_list("PastelMap", colores_pastel, N=256)
         mapa_tierra = LinearSegmentedColormap.from_list("TierraMap", colores_tierra, N=256)
         mapa_pastel_personalizado = LinearSegmentedColormap.from_list("PastelPersonalizadoMap", colores_pastel_personalizados, N=256)
 
+        # Limpiar figura y retícula
         self.figure.clear()
         axs = self.figure.subplots(2, 2).flatten()
+
+        # Imagen en escala de grises
         axs[0].imshow(imagen_gris, cmap='gray')
-        axs[0].set_title('Imagen en escala de grises')
+        axs[0].set_title('Imagen en escala de grises', fontname=nombre_fuente, fontsize=tamano_fuente*2)
         axs[0].axis('off')
+        axs[0].set_aspect('equal')
+
+        # Mapa pastel
         axs[1].imshow(imagen_gris, cmap=mapa_pastel)
-        axs[1].set_title('Mapa de color pastel')
+        axs[1].set_title('Mapa de color pastel', fontname=nombre_fuente, fontsize=tamano_fuente*2)
         axs[1].axis('off')
+        axs[1].set_aspect('equal')
+
+        # Mapa tierra
         axs[2].imshow(imagen_gris, cmap=mapa_tierra)
-        axs[2].set_title('Mapa de color tierra')
+        axs[2].set_title('Mapa de color tierra', fontname=nombre_fuente, fontsize=tamano_fuente*2)
         axs[2].axis('off')
+        axs[2].set_aspect('equal')
+
+        # Mapa pastel personalizado
         axs[3].imshow(imagen_gris, cmap=mapa_pastel_personalizado)
-        axs[3].set_title('Mapa de color pastel personalizado')
+        axs[3].set_title('Mapa de color pastel personalizado', fontname=nombre_fuente, fontsize=tamano_fuente*2)
         axs[3].axis('off')
-        self.figure.tight_layout()
+        axs[3].set_aspect('equal')
+
+        # Maximizar uso de pantalla con márgenes mínimos
+        self.figure.subplots_adjust(
+            left=0.05,   # casi sin margen izquierdo
+            right=0.95,  # casi sin margen derecho
+            top=0.95,    # espacio justo para títulos
+            bottom=0.05, # espacio justo para títulos inferiores
+            wspace=0.05, # mínima separación horizontal
+            hspace=0.25  # separación vertical suficiente para títulos
+        )
+
+        # Render estable
         self.canvas.draw()
-        # Guardado diferido: figura matplotlib
-        self.last_processed_image = None  # Guardamos la figura matplotlib
-        self.last_action = "personalizacion" # <-- trackeamos acción
 
-    def mostrar_comparacion_mapas_gui(self, imagen_gris):
-        nombres_colormaps = list(mapas_color.keys())
-        n_colormaps = len(nombres_colormaps)
-        total_imgs = n_colormaps + 1  # +1 para la imagen en escala de grises
+        # Guardado diferido
+        self.last_processed_image = None
+        self.last_action = "personalizacion"
 
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        ruta_carpeta = os.path.join(script_dir, 'resources/pseudocolor')
+        os.makedirs(ruta_carpeta, exist_ok=True)
+        self.ruta_imagen_comp = os.path.join(ruta_carpeta, f"mapas_color_personalizados_{timestamp}.png")
+        self.ruta_imagen_proc = None
+
+    def mostrar_comparacion_mapas_gui(self, resultados):
+        total_imgs = len(resultados) + 1
         n_cols = min(5, total_imgs)
         n_rows = int(np.ceil(total_imgs / n_cols))
 
         self.figure.clear()
         axs = self.figure.subplots(n_rows, n_cols).reshape(-1)
 
-        # Imagen en escala de grises
+        # Imagen original
+        imagen_gris = cv2.imread(self.imagen_path, cv2.IMREAD_GRAYSCALE)
         axs[0].imshow(imagen_gris, cmap='gray')
-        axs[0].set_title('Escala de grises')
+        axs[0].set_title('Escala de grises', fontname=nombre_fuente, fontsize=tamano_fuente*2)
         axs[0].axis('off')
 
-        # Pseudocolores
-        for idx, nombre in enumerate(nombres_colormaps):
-            pseudocolor = ImagenPseudocolor.aplicar_pseudocolor(imagen_gris, nombre)
-            axs[idx+1].imshow(cv2.cvtColor(pseudocolor.imagen, cv2.COLOR_BGR2RGB))
-            axs[idx+1].set_title(nombre)
+        # Dibujar resultados con progreso 30–95
+        total = len(resultados)
+        for idx, (nombre, imagen) in enumerate(resultados):
+            axs[idx+1].imshow(cv2.cvtColor(imagen, cv2.COLOR_BGR2RGB))
+            axs[idx+1].set_title(nombre, fontname=nombre_fuente, fontsize=tamano_fuente*2)
             axs[idx+1].axis('off')
 
-        # Ocultar ejes sobrantes
+            # Actualizar progreso paso a paso
+            progreso = 20 + int((idx+1)/total * 75)  # hasta ~95%
+            self.progress_dialog.setValue(progreso)
+            QApplication.processEvents()
+
+            # Dibujar en bloques intermedios con draw_idle
+            if (idx+1) % n_cols == 0 and (idx+1) != total:
+                self.canvas.draw_idle()
+                QApplication.processEvents()
+
+        # Desactivar ejes sobrantes
         for ax in axs[total_imgs:]:
             ax.axis('off')
 
+        # Ajustar layout al final
         self.figure.tight_layout(rect=[0, 0, 1, 1])
+
+        # Render final síncrono
         self.canvas.draw()
+        QApplication.processEvents()
 
-        # Guardado diferido: figura matplotlib
-        self.last_processed_image = None
+        # Finalizar loader justo después del render completo
+        self.progress_dialog.setValue(100)
+        self.progress_dialog.close()
+
+        # Guardado diferido
         self.last_action = "comparacion"
-
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        ruta_carpeta = os.path.join(script_dir, 'resources/pseudocolor')
+        os.makedirs(ruta_carpeta, exist_ok=True)
+        self.ruta_imagen_comp = os.path.join(ruta_carpeta, f"comparacion_mapas_color_{timestamp}.png")
+        self.ruta_imagen_proc = None
 
     def save_current_image(self):
         if self.last_action is None:
             self.show_error("Selecciona una opción válida antes de guardar la imagen.")
             return
 
-        ruta_carpeta = os.path.join(script_dir, 'resources/pseudocolor')
-        os.makedirs(ruta_carpeta, exist_ok=True)
-
         if self.last_action == "pseudocolor" and self.last_processed_image is not None:
-            # Obtener colormap actual del combo
-            colormap_name = self.colormap_combo.currentText().strip().replace(" ", "_")
+            cv2.imwrite(self.ruta_imagen_proc, self.last_processed_image)
+            self.figure.savefig(self.ruta_imagen_comp, bbox_inches='tight', pad_inches=0.05)
+            self.show_info(f"Imagen guardada en:\n{self.ruta_imagen_proc}\nComparación guardada en:\n{self.ruta_imagen_comp}")
 
-            # Guardar imagen procesada (OpenCV)
-            nombre_archivo = f"imagen_procesada_{colormap_name}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            ruta_imagen = os.path.join(ruta_carpeta, nombre_archivo)
-            cv2.imwrite(ruta_imagen, self.last_processed_image)
-
-            # Guardar la figura actual (comparación ya dibujada en el canvas)
-            nombre_archivo_comp = f"comparacion_pseudocolor_{colormap_name}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            ruta_imagen_comp = os.path.join(ruta_carpeta, nombre_archivo_comp)
-            self.figure.savefig(ruta_imagen_comp, bbox_inches='tight', pad_inches=0.05)
-
-            self.show_info(f"Imagen guardada en:\n{ruta_imagen}\nComparación guardada en:\n{ruta_imagen_comp}")
-
-        elif self.last_action == "personalizacion":
-            nombre_archivo = f"mapas_color_personalizados_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            ruta_imagen = os.path.join(ruta_carpeta, nombre_archivo)
-            self.figure.savefig(ruta_imagen, bbox_inches='tight', pad_inches=0.05)
-            self.show_info(f"Figura guardada en:\n{ruta_imagen}")
-
-        elif self.last_action == "comparacion":
-            nombre_archivo = f"comparacion_mapas_color_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            ruta_imagen = os.path.join(ruta_carpeta, nombre_archivo)
-            self.figure.savefig(ruta_imagen, bbox_inches='tight', pad_inches=0.05)
-            self.show_info(f"Comparación guardada en:\n{ruta_imagen}")
+        elif self.last_action in ["personalizacion", "comparacion"]:
+            self.figure.savefig(self.ruta_imagen_comp, bbox_inches='tight', pad_inches=0.05)
+            self.show_info(f"Figura guardada en:\n{self.ruta_imagen_comp}")
 
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Practica 1 - Menú Principal (GUI)")
-        self.resize(1800, 1200)
+        # Obtener tamaño de la pantalla principal
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        # screen = screen.geometry() # Incluye la barra de tareas
+
+        # Ajustar ventana al tamaño de la pantalla para evitar superposición con la barra de tareas
+        self.setGeometry(screen.x(), screen.y(), screen.width()-1000, screen.height()-120)
 
         # Centrar ventana
-        screen = QGuiApplication.primaryScreen().availableGeometry()
         center_point = screen.center()
         frame_geom = self.frameGeometry()
         frame_geom.moveCenter(center_point)
@@ -182,13 +334,13 @@ class Practica1GUI(QMainWindow):
         self.btn_apply_colormap.clicked.connect(self.apply_colormap_menu)
         self.layout.addWidget(self.btn_apply_colormap)
 
-        self.colormap_combo = QComboBox()
+        self.colormap_combo = ClickableComboBox()
         self.colormap_combo.addItems(list(mapas_color.keys()))
         self.colormap_combo.setPlaceholderText("Selecciona un mapa de color")
         self.colormap_combo.setItemDelegate(CenteredComboBoxDelegate(self.colormap_combo))
-        self.colormap_combo.setEditable(True)
-        self.colormap_combo.lineEdit().setAlignment(Qt.AlignCenter)
-        self.colormap_combo.lineEdit().setReadOnly(True)
+
+         # Mostrar todos los colormaps disponibles en el desplegable
+        self.colormap_combo.setMaxVisibleItems(len(mapas_color))
         self.layout.addWidget(self.colormap_combo)
 
         self.btn_customize_colormap = QPushButton("3. Personalización del Mapa de Color")
@@ -215,13 +367,14 @@ class Practica1GUI(QMainWindow):
         self.last_action = None # trackea la última opción seleccionada 
         self.last_processed_image = None # trackea la última imagen procesada (OpenCV) para guardado diferido
 
-        # Espaciador flexible para empujar el botón hacia abajo
-        # self.layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
-
         # Botón para guardar la imagen procesada o la figura actual
         self.btn_save_image = QPushButton("Guardar Imagen Procesada")
         self.btn_save_image.clicked.connect(self.save_current_image)
         self.layout.addWidget(self.btn_save_image)
+
+        # Inicialmente no creamos el diálogo
+        self.progress_dialog = None 
+        self.worker = None
 
 
     def select_image(self):
@@ -242,46 +395,75 @@ class Practica1GUI(QMainWindow):
         self.figure.clear()
         ax = self.figure.add_subplot(111)
         ax.imshow(self.img_rgb)
-        ax.set_title("Imagen Original")
+        # Definir fuente y tamaño para el título 
+        ax.set_title("Imagen Original", fontname=nombre_fuente, fontsize=tamano_fuente*2)
         ax.axis("off")
         self.canvas.draw()
 
     def apply_colormap_menu(self):
         if self.imagen_path is None:
-            self.show_error("No hay imagen seleccionada. Por favor, selecciona una imagen antes de aplicar un mapa de color.")
+            self.show_error("No hay imagen seleccionada.")
             return
         imagen_gris = cv2.imread(self.imagen_path, cv2.IMREAD_GRAYSCALE)
         if imagen_gris is None:
-            self.show_error("No se pudo cargar la imagen. Asegúrate de seleccionar un archivo de imagen válido.")
+            self.show_error("No se pudo cargar la imagen.")
             return
         colormap_name = self.colormap_combo.currentText()
         if not colormap_name:
             self.show_error("Selecciona un mapa de color.")
             return
-        self.mostrar_pseudocolor(imagen_gris, colormap_name)
+
+        # Loader
+        self.show_loader("Aplicando mapa de color...", "Procesando Imagen")
+
+        # Worker
+        self.worker = WorkerApplyColormap(imagen_gris, colormap_name)
+        self.worker.progress.connect(self.progress_dialog.setValue)
+        self.worker.finished.connect(lambda datos: self.mostrar_pseudocolor(*datos))
+        self.worker.done.connect(self.progress_dialog.close)
+        self.worker.start()
 
     def customize_colormap(self):
         if self.imagen_path is None:
-            self.show_error("No hay imagen seleccionada. Por favor, selecciona una imagen antes de personalizar los mapas de color.")
+            self.show_error("No hay imagen seleccionada.")
             return
         imagen_gris = cv2.imread(self.imagen_path, cv2.IMREAD_GRAYSCALE)
         if imagen_gris is None:
-            self.show_error("No se pudo cargar la imagen. Asegúrate de seleccionar un archivo de imagen válido.")
+            self.show_error("No se pudo cargar la imagen.")
             return
-        self.mostrar_personalizacion_mapas_gui(imagen_gris)
+
+        # Loader
+        self.show_loader("Generando mapas personalizados...", "Procesando Imagen")
+
+        # Worker
+        self.worker = WorkerCustomizeColormap(imagen_gris)
+        self.worker.progress.connect(self.progress_dialog.setValue)
+        self.worker.finished.connect(self.mostrar_personalizacion_mapas_gui)
+        self.worker.finished.connect(self.progress_dialog.close)
+        self.worker.start()
 
     def compare_colormaps(self):
         if self.imagen_path is None:
-            self.show_error("No hay imagen seleccionada. Por favor, selecciona una imagen antes de comparar los mapas de color.")
+            self.show_error("No hay imagen seleccionada.")
             return
         imagen_gris = cv2.imread(self.imagen_path, cv2.IMREAD_GRAYSCALE)
         if imagen_gris is None:
-            self.show_error("No se pudo cargar la imagen. Asegúrate de seleccionar un archivo de imagen válido.")
+            self.show_error("No se pudo cargar la imagen.")
             return
-        self.mostrar_comparacion_mapas_gui(imagen_gris)
+
+        # Crear loader con rango definido para mostrar progreso real
+        self.show_loader("Comparando mapas de color...", "Procesando Imágenes")
+
+        # Crear worker
+        self.worker = WorkerCompareColorMap(imagen_gris)
+        self.worker.progress.connect(self.progress_dialog.setValue)
+        self.worker.finished.connect(self.mostrar_comparacion_mapas_gui)
+        self.worker.start()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setFont(QFont(nombre_fuente, tamano_fuente))
     viewer = Practica1GUI()
     viewer.show()
     sys.exit(app.exec_())

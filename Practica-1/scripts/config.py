@@ -9,6 +9,11 @@ import cv2
 # Obtener el directorio del script y regresar un nivel en la jerarquía de carpetas
 script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Definir nombre y tamaño de la fuente para la configuración de estilos de la GUI para asegurar una apariencia consistente.
+nombre_fuente = "Arial" # Nombre de la fuente a utilizar en la GUI
+tamano_fuente = 14  # Tamaño de fuente en puntos
+
+
 # Diccionario de mapas de color disponibles en OpenCV
 # Obtener automáticamente todos los colormaps disponibles
 mapas_color = {name.replace("COLORMAP_", ""): getattr(cv2, name) 
@@ -36,8 +41,7 @@ colores_tierra = [
 # Definir colores pastel personalizado en formato RGB normalizado (valores entre 0 y 1)
 # Evitar tonos oscuros y mantiener la imagen luminosa.
 # Para más color, bajar  los valores mínimos a 0.75–0.8, manteniendo la suavidad pastel pero con más contraste y color.
-"""
-# Primer version personalizada, más suave y clara, pero con menos contraste y color:
+""" # Primer version personalizada, más suave y clara, pero con menos contraste y color:
 colores_pastel_personalizados = [
     (1.0, 0.95, 0.85),  # crema claro
     (0.95, 0.85, 1.0),  # lila pastel
@@ -49,8 +53,7 @@ colores_pastel_personalizados = [
 ]
 """
 
-"""
-# Más contraste y color, pero manteniendo la suavidad pastel:
+""" # Más contraste y color, pero manteniendo la suavidad pastel:
 colores_pastel_personalizados = [
     (1.0, 0.85, 0.95),  # rosa pastel
     (0.85, 1.0, 0.85),  # verde menta
