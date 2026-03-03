@@ -1,7 +1,7 @@
 # --------- PRACTICA 1 "CREANDO MI MAPA DE CALOR" ---------
 # --------- GUI PRINCIPAL PARA LA PRÁCTICA 1 --------------
 # Autor: Rodrigo Arturo Fernández González
-# Fecha: 02-19-2026
+# Fecha: 19-02-2026
 
 import os
 import sys

@@ -1,7 +1,7 @@
 # --------- PRACTICA 1 "CREANDO MI MAPA DE CALOR" ---------
 # --------- ACTIVIDAD 1 -----------------------------------
 # Autor: Rodrigo Arturo Fernández González
-# Fecha: 02-18-2026
+# Fecha: 18-02-2026
 
 import os
 import cv2

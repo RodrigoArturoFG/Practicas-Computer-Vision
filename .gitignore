@@ -1,0 +1,23 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# --- IDEs (VS Code / PyCharm) ---
+.vscode/
+.idea/
+.history/
+*.log
+
+# --- Datos y Recursos ---
+# Ignora resultados de salida para no llenar el repo de fotos procesadas
+**/resources/output/
+# Si las datasets son muy pesados, ignorar la entrada también:
+# **/resources/input/
+
+# --- Sistema Operativo ---
+.DS_Store
+Thumbs.db

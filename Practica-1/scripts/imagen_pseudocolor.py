@@ -1,6 +1,6 @@
 # --------- CLASE IMAGEN PSEUDOCOLOR ---------
 # Autor: Rodrigo Arturo Fernández González
-# Fecha: 02-19-2026
+# Fecha: 19-02-2026
 
 import os
 import cv2

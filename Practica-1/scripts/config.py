@@ -1,6 +1,6 @@
 # --------- CONFIGURACIÓN DE PARÁMETROS PARA LA PRÁCTICA 1  ---------
 # Autor: Rodrigo Arturo Fernández González
-# Fecha: 02-19-2026
+# Fecha: 19-02-2026
 
 import os
 import cv2
@@ -12,7 +12,6 @@ script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Definir nombre y tamaño de la fuente para la configuración de estilos de la GUI para asegurar una apariencia consistente.
 nombre_fuente = "Arial" # Nombre de la fuente a utilizar en la GUI
 tamano_fuente = 14  # Tamaño de fuente en puntos
-
 
 # Diccionario de mapas de color disponibles en OpenCV
 # Obtener automáticamente todos los colormaps disponibles
