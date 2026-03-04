@@ -2,13 +2,15 @@
 # Autor: Rodrigo Arturo Fernández González
 # Fecha: 19-02-2026
 
+# Librerías estándar para manejo de archivos y procesamiento de imágenes.
 import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-from config import mapas_color # Importar el diccionario de mapas de color desde config.py
-from config import script_dir  # Importar la variable script_dir desde config.py
+# Módulos propios para la práctica
+from config import mapas_color # Importar el diccionario de mapas de color disponibles en OpenCV
+from config import script_dir  # Importar el directorio del script para poder guardar imagen pseudocolor
 
 class ImagenPseudocolor:
     """
@@ -41,6 +43,8 @@ class ImagenPseudocolor:
         # Retorna una instancia de la clase aplicando el mapa de color seleccionado
         return cls(imagen_gris, opcion)
 
+    # Metodos adicionales para mostrar y guardar la imagen pseudocolor.
+    # Pueden ser útiles fuera de la práctica, ya que se uso otra lógica para visualizar y guardar las imagenes.
     def mostrar(self, imagen_gris: np.ndarray = None) -> None:
         """
         Visualiza la imagen pseudocolor sola o junto con la imagen en escala de grises si se proporciona.

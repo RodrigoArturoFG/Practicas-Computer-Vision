@@ -5,7 +5,6 @@
 import os
 import cv2
 
-
 # Obtener el directorio del script y regresar un nivel en la jerarquía de carpetas
 script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,7 +17,7 @@ tamano_fuente = 14  # Tamaño de fuente en puntos
 mapas_color = {name.replace("COLORMAP_", ""): getattr(cv2, name) 
                for name in dir(cv2) if name.startswith("COLORMAP_")}
 
-# Mapas de color personalizados
+# Mapas de color personalizado proporcionado en el pdf de la práctica
 # Definir colores pastel en formato RGB normalizado (valores entre 0 y 1)
 colores_pastel = [
     (1.0, 0.8, 0.9), # rosa claro
@@ -37,7 +36,7 @@ colores_tierra = [
     (0.5, 0.3, 0.1) # marrón muy oscuro
 ]
 
-# Definir colores pastel personalizado en formato RGB normalizado (valores entre 0 y 1)
+# Definir colores pastel personalizados en formato RGB normalizado (valores entre 0 y 1)
 # Evitar tonos oscuros y mantiener la imagen luminosa.
 # Para más color, bajar  los valores mínimos a 0.75–0.8, manteniendo la suavidad pastel pero con más contraste y color.
 """ # Primer version personalizada, más suave y clara, pero con menos contraste y color:

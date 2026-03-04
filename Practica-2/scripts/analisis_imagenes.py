@@ -1,20 +1,19 @@
 # ----- PRACTICA 2 "EXPLORANDO LA IMAGEN DIGITAL CON PYTHON" -----
-# --------------------------------------------
+# ----------------------------------------------------------------
 # Autor: Rodrigo Arturo Fernández González
 # Fecha: 02-03-2026
 
-
-from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import os
 
 import config
+import image_manager
 
 # 1. Lectura de imagen con Pillow
-def cargar_imagen_pillow(ruta):
-    imagen = Image.open(ruta)
+def lectura_imagen_pillow(ruta):
+    imagen = image_manager.cargar_imagen_pillow(ruta)
     #plt.figure(figsize=(5, 5))
     plt.imshow(imagen)
     plt.title("Imagen original (Pillow)")
@@ -23,9 +22,8 @@ def cargar_imagen_pillow(ruta):
     return imagen
 
 # 2. Lectura de imagen con OpenCV
-def cargar_imagen_opencv(ruta):
-    imagen_cv = cv2.imread(ruta)
-    imagen_cv_rgb = cv2.cvtColor(imagen_cv, cv2.COLOR_BGR2RGB)
+def lectura_imagen_opencv(ruta):
+    imagen_cv_rgb = image_manager.cargar_imagen_opencv(ruta)
     #plt.figure(figsize=(5, 5))
     plt.imshow(imagen_cv_rgb)
     plt.title("Imagen con OpenCV (RGB)")
@@ -71,6 +69,7 @@ def binarizar_imagen(imagen_gris, umbral=128):
     return binaria
 
 # 6. Función para convertir la imagen a hsv y mostrar los canales por separado
+# Definir estructura, objeto, o diccionario según sea mas optimo que contenga: imagen_HSV, H (matiz), S (saturación), V (valor)
 def convertir_a_hsv(imagen_cv):
     imagen_hsv = cv2.cvtColor(imagen_cv, cv2.COLOR_BGR2HSV)
     h, s, v = cv2.split(imagen_hsv)
@@ -114,11 +113,11 @@ def convertir_a_cmy(imagen_cv_rgb):
     return imagen_cmy
 
 if __name__ == "__main__":
-    imagen_pillow = cargar_imagen_pillow(os.path.join(config.script_dir_parent, 'resources\\input\\pentium4_microscopio.jpg'))
+    imagen_pillow = lectura_imagen_pillow(os.path.join(config.script_dir_parent, 'resources\\input\\pentium4_microscopio.jpg'))
     separar_rgb(imagen_pillow)
     imagen_gris = convertir_a_grises(imagen_pillow)
     binarizar_imagen(imagen_gris, umbral=128)
 
-    imagen_opencv = cargar_imagen_opencv(os.path.join(config.script_dir_parent, 'resources\\input\\pentium4_microscopio.jpg'))
+    imagen_opencv = lectura_imagen_opencv(os.path.join(config.script_dir_parent, 'resources\\input\\pentium4_microscopio.jpg'))
     imagen_hsv = convertir_a_hsv(imagen_opencv)
     imagen_cmy = convertir_a_cmy(imagen_opencv)
