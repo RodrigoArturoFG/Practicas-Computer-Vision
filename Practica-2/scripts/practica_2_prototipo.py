@@ -175,6 +175,38 @@ def convertir_a_cmy(imagen_metadata):
         
     return imagen_metadata
 
+# Función para la imagen a YIQ y mostrar los canales por separado
+# (YIQ simulado, ya que OpenCV no lo soporta directamente)
+def convertir_a_yiq(imagen_metadata):
+    # Llamamos a la función y recibimos el wrapper con la respuesta
+    respuesta = procesadorImagen.conversion_imagen_opencv_yiq(imagen_metadata)
+
+    # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
+    imagen_metadata = respuesta["objeto"]
+
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+        
+    return imagen_metadata
+
+# Función para la imagen a HSI y mostrar los canales por separado
+# (HSI simulado, ya que OpenCV no lo soporta directamente)
+def convertir_a_hsi(imagen_metadata):
+    # Llamamos a la función y recibimos el wrapper con la respuesta
+    respuesta = procesadorImagen.conversion_imagen_opencv_hsi(imagen_metadata)
+
+    # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
+    imagen_metadata = respuesta["objeto"]
+
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+        
+    return imagen_metadata
+
 # Mostrar imagen en pantalla (Versión Optimizada por Metadatos del Modelo)
 def mostrar_imagen_opencv(imagen_metadata):
     """
@@ -361,6 +393,8 @@ def menu_principal():
         print(" 5. Binarizar imagen (Otsu)")
         print(" 6. Convertir a modelo HSV.")
         print(" 7. Convertir a modelo CMY.")
+        print(" 8. Convertir a modelo YIQ.")
+        print(" 9. Convertir a modelo HSI.")
         print(" 10. Calcular Histograma Automático (RGB, GRIS, HSV, ETC).")
         print(" 11. RESTABLECER IMAGEN ORIGINAL.")
         print(" 12. Salir.")
@@ -408,6 +442,14 @@ def menu_principal():
 
         elif opcion == "7":
             imagen_actual = convertir_a_cmy(imagen_metadata)
+            mostrar_imagen_opencv(imagen_metadata)
+        
+        elif opcion == "8":
+            imagen_actual = convertir_a_yiq(imagen_metadata)
+            mostrar_imagen_opencv(imagen_metadata)
+
+        elif opcion == "9":
+            imagen_actual = convertir_a_hsi(imagen_metadata)
             mostrar_imagen_opencv(imagen_metadata)
 
         # --- ANÁLISIS ---

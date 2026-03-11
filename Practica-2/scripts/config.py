@@ -13,4 +13,3 @@ script_dir_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Definir nombre y tamaño de la fuente para la configuración de estilos de la GUI para asegurar una apariencia consistente.
 nombre_fuente = "Arial" # Nombre de la fuente a utilizar en la GUI
 tamano_fuente = 14  # Tamaño de fuente en puntos
-
