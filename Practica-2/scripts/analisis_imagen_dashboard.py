@@ -454,9 +454,35 @@ class VentanaDashboard(QMainWindow):
         fila_s.addWidget(lbl_0); fila_s.addWidget(self.slider); fila_s.addWidget(lbl_255)
         layout.addLayout(fila_s)
 
+        btn_menos = QPushButton(" − ")
+        btn_menos.setFixedWidth(36)
+        btn_menos.setToolTip("Decrementar umbral en 1")
+        btn_menos.setCursor(Qt.PointingHandCursor)
+        btn_menos.setStyleSheet(f"""
+            QPushButton {{ background: {C['accent_dim']}; color: {C['accent']}; border: 1px solid {C['accent']}; border-radius: 4px; font-size: 14pt; font-weight: bold; padding: 0px; }}
+            QPushButton:hover {{ background: {C['accent']}; color: #ffffff; }}
+        """)
+        btn_menos.clicked.connect(lambda: self.slider.setValue(max(0, self.slider.value() - 1)))
+
+        btn_mas = QPushButton(" + ")
+        btn_mas.setFixedWidth(36)
+        btn_mas.setToolTip("Incrementar umbral en 1")
+        btn_mas.setCursor(Qt.PointingHandCursor)
+        btn_mas.setStyleSheet(f"""
+            QPushButton {{ background: {C['accent_dim']}; color: {C['accent']}; border: 1px solid {C['accent']}; border-radius: 4px; font-size: 14pt; font-weight: bold; padding: 0px; }}
+            QPushButton:hover {{ background: {C['accent']}; color: #ffffff; }}
+        """)
+        btn_mas.clicked.connect(lambda: self.slider.setValue(min(255, self.slider.value() + 1)))
+
         self.lbl_umbral = QLabel("Umbral: 128")
-        self.lbl_umbral.setStyleSheet(f"color:{C['accent']}; font-size:11px;")
-        layout.addWidget(self.lbl_umbral)
+        self.lbl_umbral.setAlignment(Qt.AlignCenter)
+        self.lbl_umbral.setStyleSheet(f"color:{C['accent']}; font-size:13pt; font-weight:bold;")
+
+        fila_umbral = QHBoxLayout()
+        fila_umbral.addWidget(btn_menos)
+        fila_umbral.addWidget(self.lbl_umbral, 1)
+        fila_umbral.addWidget(btn_mas)
+        layout.addLayout(fila_umbral)
 
         btn_bin_man = QPushButton("⬛  Binarizar (Manual)")
         btn_bin_man.setCursor(Qt.PointingHandCursor)
