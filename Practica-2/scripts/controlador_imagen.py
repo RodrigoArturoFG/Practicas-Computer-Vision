@@ -416,3 +416,26 @@ def obtener_config_modelo(tipo_modelo="RGB"):
     }
     # Devuelve la config solicitada o una genérica por defecto
     return configuraciones.get(tipo_modelo.upper(), {"nombres": None, "cmaps": None})
+
+# Actualiza la imagen actual a partir de un estado anterior guardado en el historial
+def cargar_estado_historial(historial_imagen_metadata, imagen_actual_metadata):
+    respuesta = None
+    match historial_imagen_metadata.modelo:
+        case "RGB":
+            respuesta = cargar_imagen_opencv_rgb(imagen_actual_metadata)
+        case "HSV":
+            respuesta = conversion_imagen_opencv_hsv(imagen_actual_metadata)
+        case "CMY":
+            respuesta = conversion_imagen_opencv_cmy(imagen_actual_metadata)
+        case "GRIS":
+            respuesta = cargar_imagen_opencv_gris(imagen_actual_metadata)
+        case "BINARIO":
+            respuesta = conversion_imagen_opencv_binaria(imagen_actual_metadata, historial_imagen_metadata.umbral)
+        case "YIQ":
+            respuesta = conversion_imagen_opencv_yiq(imagen_actual_metadata)
+        case "HSI":
+            respuesta = conversion_imagen_opencv_hsi(imagen_actual_metadata)
+        case _:
+            respuesta = wrapper_respuesta(imagen_actual_metadata, False, f"No se encontró el modelo: {historial_imagen_metadata.modelo}")
+    
+    return respuesta
