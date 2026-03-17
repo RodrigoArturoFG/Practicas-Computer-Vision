@@ -1,7 +1,8 @@
 # =====================================================================
-# PRÁCTICA 2 - "EXPLORANDO LA IMAGEN DIGITAL CON PYTHON"
+# PRÁCTICA 3 - "CONTEO DE OBJETOS"
 # VERSIÓN 2: Layout 3 Paneles (Dashboard)
 # Autor: Rodrigo Arturo Fernández González
+# Fecha: 10-03-2026
 # UI desarrollada con PyQt5
 # =====================================================================
 

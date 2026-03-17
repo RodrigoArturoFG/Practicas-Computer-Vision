@@ -17,6 +17,8 @@ ENV/
 **/resources/output/
 # Si las datasets son muy pesados, ignorar la entrada también:
 # **/resources/input/
+# Caché local de la aplicación
+**/.ultimo_directorio.txt
 
 # --- Sistema Operativo ---
 .DS_Store
