@@ -2,6 +2,7 @@
 # --------------------------------------------
 # Autor: Rodrigo Arturo Fernández González
 # Fecha: 10-03-2026
+# Version: 1.0
 
 import matplotlib.pyplot as plt
 from scipy.stats import skew
@@ -16,7 +17,7 @@ import controlador_imagen as procesadorImagen
 from modelo_imagen import metadataImagen
 
 # --------- VARIABLES GLOBALES ---------
-ruta_imagen = os.path.join(config.script_dir_parent, 'resources\\input\\estrella_naranja.jpeg')
+ruta_imagen = os.path.join(config.script_dir_parent, 'resources/input/estrella_amarilla.jpeg')
 imagen_metadata = metadataImagen(ruta_imagen)
 
 # Obtine la ruta de la imagen seleccionada
@@ -97,22 +98,6 @@ def cargar_imagen_rgb_opencv(imagen_metadata):
         
     return imagen_metadata
 
-# Convertir a grises (Versión Flexible para UI)
-# Una imagen gris en OpenCV tiene 2 dimensiones: (alto, ancho)
-def convertir_a_grises(imagen_metadata):
-    # Llamamos a la función y recibimos el wrapper con la respuesta
-    respuesta = procesadorImagen.cargar_imagen_opencv_gris(imagen_metadata)
-        
-    # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
-    imagen_metadata = respuesta["objeto"]
-
-    if respuesta["error"]:
-        print(f"\n[!] ERROR: {respuesta['mensaje']}")
-    else:
-        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
-        
-    return imagen_metadata
-
 # Binarizar imagen
 def binarizar_imagen(imagen_metadata, umbral=128):
     # Llamamos a la función y recibimos el wrapper con la respuesta
@@ -132,70 +117,6 @@ def binarizar_imagen(imagen_metadata, umbral=128):
 def binarizar_imagen_otsu(imagen_metadata):
     # Llamamos a la función y recibimos el wrapper con la respuesta
     respuesta = procesadorImagen.conversion_imagen_opencv_otsu(imagen_metadata)
-
-    # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
-    imagen_metadata = respuesta["objeto"]
-
-    if respuesta["error"]:
-        print(f"\n[!] ERROR: {respuesta['mensaje']}")
-    else:
-        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
-        
-    return imagen_metadata
-
-# Función para convertir la imagen a HSV y mostrar los canales por separado
-def convertir_a_hsv(imagen_metadata):
-    # Llamamos a la función y recibimos el wrapper con la respuesta
-    respuesta = procesadorImagen.conversion_imagen_opencv_hsv(imagen_metadata)
-
-    # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
-    imagen_metadata = respuesta["objeto"]
-
-    if respuesta["error"]:
-        print(f"\n[!] ERROR: {respuesta['mensaje']}")
-    else:
-        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
-        
-    return imagen_metadata
-
-
-# Función para la imagen a cmy y mostrar los canales por separado
-# (CMY simulado, ya que OpenCV no lo soporta directamente)
-def convertir_a_cmy(imagen_metadata):
-    # Llamamos a la función y recibimos el wrapper con la respuesta
-    respuesta = procesadorImagen.conversion_imagen_opencv_cmy(imagen_metadata)
-
-    # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
-    imagen_metadata = respuesta["objeto"]
-
-    if respuesta["error"]:
-        print(f"\n[!] ERROR: {respuesta['mensaje']}")
-    else:
-        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
-        
-    return imagen_metadata
-
-# Función para la imagen a YIQ y mostrar los canales por separado
-# (YIQ simulado, ya que OpenCV no lo soporta directamente)
-def convertir_a_yiq(imagen_metadata):
-    # Llamamos a la función y recibimos el wrapper con la respuesta
-    respuesta = procesadorImagen.conversion_imagen_opencv_yiq(imagen_metadata)
-
-    # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
-    imagen_metadata = respuesta["objeto"]
-
-    if respuesta["error"]:
-        print(f"\n[!] ERROR: {respuesta['mensaje']}")
-    else:
-        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
-        
-    return imagen_metadata
-
-# Función para la imagen a HSI y mostrar los canales por separado
-# (HSI simulado, ya que OpenCV no lo soporta directamente)
-def convertir_a_hsi(imagen_metadata):
-    # Llamamos a la función y recibimos el wrapper con la respuesta
-    respuesta = procesadorImagen.conversion_imagen_opencv_hsi(imagen_metadata)
 
     # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
     imagen_metadata = respuesta["objeto"]
@@ -231,233 +152,410 @@ def mostrar_imagen_opencv(imagen_metadata):
     plt.axis("off")
     plt.show()
 
-# Función Genérica para Separar y Visualizar Canales (RGB, HSV, CMY, etc.)
-def separar_canales(imagen_metadata):
-    """
-    Separa y muestra los canales de cualquier modelo de color utilizando la configuración obtenida de: 
-    procesadorImagen.obtener_config_modelo(tipo_modelo)
-    \n--- EJEMPLOS DE LLAMADA ---
-    # Para RGB:
-    separar_canales(img_rgb, "RGB")
+# Función para agregar ruido SAL (píxeles blancos aleatorios)
+def agregar_ruido_sal(imagen_metadata, cantidad=0.02):
+    # Llamamos a la función y recibimos el wrapper con la respuesta
+    respuesta = procesadorImagen.agregar_ruido_sal(imagen_metadata, cantidad)
 
-    # Para HSV:
-    separar_canales(img_hsv, "HSV")
-
-    # Para CMY:
-    separar_canales(img_cmy, "CMY")
-
-    # Para Gris o Binaria:
-    separar_canales(img_gray, "GRIS")
-    """
-    # 1. Obtener la configuración específica para este modelo
-    conf = procesadorImagen.obtener_config_modelo(imagen_metadata.modelo)
-    nombres = conf["nombres"]
-    mapas = conf["cmaps"]
-
-    # 2. Separación de canales con OpenCV
-    canales = cv2.split(imagen_metadata.datos)
-    num_canales = len(canales)
-    
-    # 3. Visualización Dinámica
-    plt.figure(figsize=(4 * num_canales, 4))
-    
-    for i in range(num_canales):
-        plt.subplot(1, num_canales, i + 1)
-        
-        # Asignar nombre y mapa de color desde la configuración
-        nombre_actual = nombres[i] if nombres and i < len(nombres) else f'Canal {i+1}'
-        cmap_actual = mapas[i] if mapas and i < len(mapas) else 'gray'
-        
-        plt.imshow(canales[i], cmap=cmap_actual)
-        plt.title(nombre_actual)
-        plt.axis("off")
-    
-    plt.tight_layout()
-    plt.show()
-    
-    return canales
-
-# Determina automáticamente qué tipo de histograma calcular
-def calcular_histograma_automatico(imagen_metadata):
-    """
-    Determina automáticamente qué tipo de histograma calcular (dependiendo del modelo de color).
-    Las propiedades calculadas incluyen energía, entropía, asimetría (skewness), media y varianza.
-    \nSi es una imagen en grises o binaria solo se analiza un canal de intensidad (valores entre 0 y 255), lo
-    que simplifica el cálculo del histograma y las propiedades estadísticas.
-    """
-    # 1. Llamamos a la función maestra pasando el objeto de metadatos
-    respuesta = procesadorImagen.proceso_histograma_completo(imagen_metadata)
-
-    # 2. Actualizamos nuestra referencia (por si hubo cambios)
+    # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
     imagen_metadata = respuesta["objeto"]
-    
-    # 3. Gestionamos el mensaje de error o éxito del paquete
+
     if respuesta["error"]:
-        print(f"\n[!] ERROR EN HISTOGRAMA: {respuesta['mensaje']}")
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
     else:
-        # El mensaje de éxito ya confirmará que se guardaron los datos
-        print(f"\n[*] {respuesta['mensaje']}")
-    
-    # 4. Obtener la configuración visual del modelo actual (RGB, HSV, CMY, etc.)
-    config = procesadorImagen.obtener_config_modelo(imagen_metadata.modelo)    
-    nombres = config["nombres"]
-    colores = config["cmaps"]
-
-    # 5. Mostrar y Graficar después (Usando los colores de la config)
-    print(f"\n--- Análisis Estadístico: Modelo [{imagen_metadata.modelo}] ---")
-    imprimir_tabla_estadisticas(imagen_metadata.histograma, "Resultados por Canal")
-    
-    # 6. Mapeamos los nombres de matplotlib si los colores son descriptivos
-    mapa_colores_plt = [procesadorImagen.diccionario_colores.get(c.replace('_r', ''), 'black') for c in colores] # Limpiamos '_r' para el plot
-    
-    # 7. Graficar COMPUESTO o individuales según el número de canales
-    #if len(imagen_metadata.histograma) > 1:
-    graficar_y_guardar_histograma_compuesto(imagen_metadata.histograma, mapa_colores_plt, imagen_metadata.modelo, imagen_metadata.nombre)
-    # graficar_y_guardar_histogramas(imagen_metadata.histograma, mapa_colores_plt, prefijo_archivo="analisis")
-    
-    # Pausa para que el usuario lea en consola
-    print("\n" + "-"*45)
-    input("Presiona ENTER para volver al menú principal...")
-
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+        
     return imagen_metadata
 
-def graficar_y_guardar_histogramas(resultados, colores_plot, prefijo_archivo="hist"):
-    """Genera las gráficas y las guarda en disco."""
-    for i, (canal, props) in enumerate(resultados.items()):
-        plt.figure()
-        plt.title(f'Histograma del canal {canal}')
-        plt.xlabel('Intensidad')
-        plt.ylabel('Frecuencia')
-        plt.plot(props['histograma_raw'], color=colores_plot[i])
-        plt.grid(True)
+
+# Función para agregar ruido PIMIENTA (píxeles negros aleatorios)
+def agregar_ruido_pimienta(imagen_metadata, cantidad=0.02):
+    # Llamamos a la función y recibimos el wrapper con la respuesta
+    respuesta = procesadorImagen.agregar_ruido_pimienta(imagen_metadata, cantidad)
+
+    # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
+    imagen_metadata = respuesta["objeto"]
+
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
         
-        # Guardado automático
-        ruta_salida = os.path.join(config.script_dir_parent, "resources", "output")
-        os.makedirs(ruta_salida, exist_ok=True)
-        ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        plt.savefig(os.path.join(ruta_salida, f"{prefijo_archivo}_{canal.lower()}_{ts}.png"))
-        plt.show()
-        plt.close() # <--- liberar memoria
+    return imagen_metadata
 
-def graficar_y_guardar_histograma_compuesto(resultados, colores_plot, modelo, nombre_img):
-    """Genera una sola gráfica con todos los canales superpuestos."""
-    plt.figure(figsize=(10, 6))
-    
-    for i, (canal, props) in enumerate(resultados.items()):
-        # Usamos alpha=0.7 para que se vea la superposición si las líneas coinciden
-        plt.plot(props['histograma_raw'], color=colores_plot[i], label=canal, alpha=0.7)
-    
-    plt.title(f'Histograma Compuesto\nModelo de color: [{modelo}]   -   Imagen: [{nombre_img}]')
-    plt.xlabel('Intensidad de Píxel (0-255)')
-    plt.ylabel('Frecuencia (Píxeles)')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.6)
-    
-    # Guardado
-    ruta_salida = os.path.join(config.script_dir_parent, "resources", "output")
-    os.makedirs(ruta_salida, exist_ok=True)
-    ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    plt.savefig(os.path.join(ruta_salida, f"HIST_COMPUESTO_{modelo}_{ts}.png"))
-    
-    plt.show()
-    plt.close() # <--- liberar memoria
-
-
-def imprimir_tabla_estadisticas(resultados, titulo):
-    """Muestra los números en la consola."""
-    print(f"\n--- {titulo} ---")
-    for canal, props in resultados.items():
-        print(f'\nCanal {canal}:')
-        for llave, valor in props.items():
-            if llave != 'histograma_raw': # No imprimimos el array del histograma
-                print(f'  {llave}: {valor:.4f}')
-
-# Función para agregar ruido sal y pimienta
-def agregar_ruido_sal_pimienta(imagen_metadata, cantidad):
-    # Agregar validacion para cuando una imagen no sea escala de grises o binaria
-    imagen_ruido = imagen_metadata.datos.copy()
-    filas, columnas = imagen_ruido.shape
-    num_ruido = int(cantidad * filas * columnas)
-    for _ in range(num_ruido):
-        i = np.random.randint(0, columnas)
-        j = np.random.randint(0, filas)
-        if np.random.rand() < 0.5:
-            imagen_ruido[j, i] = 0 # Pimienta (negro)
-        else:
-            imagen_ruido[j, i] = 255 # Sal (blanco)
-    
-    # -------------------------------
-    # Mostrar resultados
-    fig, axs = plt.subplots(1, 2, figsize=(12, 4))
-    axs[0].imshow(imagen_metadata.datos, cmap='gray')
-    axs[0].set_title('Imagen original')
-    axs[0].axis('off')
-    axs[1].imshow(imagen_ruido, cmap='gray')
-    axs[1].set_title('Ruido sal y pimienta')
-    axs[1].axis('off')
-    plt.tight_layout()
-    plt.show()
-
-    return imagen_ruido
 
 # Función para agregar ruido gaussiano
 def agregar_ruido_gaussiano(imagen_metadata, media=0, sigma=20):
-    gauss = np.random.normal(media, sigma, imagen_metadata.datos.shape).astype(np.int16)
-    imagen_ruido = imagen_metadata.datos.astype(np.int16) + gauss
-    imagen_ruido = np.clip(imagen_ruido, 0, 255).astype(np.uint8)
+    respuesta = procesadorImagen.agregar_ruido_gaussiano(imagen_metadata, media, sigma)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
 
-    # -------------------------------
-    # Mostrar resultados
-    fig, axs = plt.subplots(1, 2, figsize=(12, 4))
-    axs[0].imshow(imagen_metadata.datos, cmap='gray')
-    axs[0].set_title('Imagen original')
+
+# Selecciona una imagen secundaria sin tocar la variable global ruta_imagen
+def seleccionar_imagen_secundaria():
+    """
+    Igual que seleccionar_imagen() pero sin modificar el estado global.
+    Devuelve un objeto metadataImagen cargado en RGB, o None si se cancela.
+    """
+    carpeta_input = os.path.join(config.script_dir_parent, 'resources/input')
+    archivos = [f for f in os.listdir(carpeta_input) if os.path.isfile(os.path.join(carpeta_input, f))]
+    if not archivos:
+        print("No se encontraron imágenes en la carpeta resources/input.")
+        return None
+
+    print("\n=== Seleccionar Imagen Secundaria (B) ===")
+    for i, nombre in enumerate(archivos, start=1):
+        print(f"  {i}. {nombre}")
+    print(f"  {len(archivos)+1}. Cancelar")
+
+    opcion = input("Selecciona el número de la imagen B: ").strip()
+    if not opcion.isdigit():
+        print("[!] Entrada inválida. Operación cancelada.")
+        return None
+
+    idx = int(opcion) - 1
+    if idx == len(archivos):
+        print("Selección cancelada.")
+        return None
+    if not (0 <= idx < len(archivos)):
+        print("[!] Número fuera de rango. Operación cancelada.")
+        return None
+
+    ruta_b = os.path.join(carpeta_input, archivos[idx])
+    imagen_b = metadataImagen(ruta_b)
+    respuesta = procesadorImagen.cargar_imagen_opencv_rgb(imagen_b)
+    imagen_b = respuesta["objeto"]
+
+    if respuesta["error"]:
+        print(f"\n[!] ERROR al cargar imagen B: {respuesta['mensaje']}")
+        return None
+
+    print(f"\n[*] Imagen B cargada: [{imagen_b.nombre}]")
+    return imagen_b
+
+
+# --- Wrappers de operaciones aritméticas ---
+
+def sumar_imagenes(imagen_metadata, imagen_b):
+    respuesta = procesadorImagen.sumar_imagenes(imagen_metadata, imagen_b)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+def restar_imagenes(imagen_metadata, imagen_b):
+    respuesta = procesadorImagen.restar_imagenes(imagen_metadata, imagen_b)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+def multiplicar_imagenes(imagen_metadata, imagen_b):
+    respuesta = procesadorImagen.multiplicar_imagenes(imagen_metadata, imagen_b)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+def submenu_operaciones_aritmeticas(imagen_metadata):
+    """
+    Submenú para operaciones aritméticas entre dos imágenes.
+    Pide la operación, luego la imagen B, ejecuta y muestra el resultado.
+    """
+    print("\n--- Operaciones Aritméticas ---")
+    print(" 1. Suma       (A + B)")
+    print(" 2. Resta      (A - B)")
+    print(" 3. Multiplicación (A × B)")
+    print(" 4. Cancelar")
+    opcion = input("Selecciona una operación: ").strip()
+
+    if opcion == "4" or opcion == "":
+        print("Operación cancelada.")
+        return imagen_metadata
+
+    if opcion not in ("1", "2", "3"):
+        print("[!] Opción inválida.")
+        return imagen_metadata
+
+    # Seleccionar imagen B (sin tocar el estado global)
+    imagen_b = seleccionar_imagen_secundaria()
+    if imagen_b is None:
+        return imagen_metadata
+
+    if opcion == "1":
+        imagen_metadata = sumar_imagenes(imagen_metadata, imagen_b)
+    elif opcion == "2":
+        imagen_metadata = restar_imagenes(imagen_metadata, imagen_b)
+    elif opcion == "3":
+        imagen_metadata = multiplicar_imagenes(imagen_metadata, imagen_b)
+
+    mostrar_imagen_opencv(imagen_metadata)
+    return imagen_metadata
+
+# --- Wrappers de operaciones lógicas ---
+
+def and_imagenes(imagen_metadata, imagen_b):
+    respuesta = procesadorImagen.and_imagenes(imagen_metadata, imagen_b)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+def or_imagenes(imagen_metadata, imagen_b):
+    respuesta = procesadorImagen.or_imagenes(imagen_metadata, imagen_b)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+def xor_imagenes(imagen_metadata, imagen_b):
+    respuesta = procesadorImagen.xor_imagenes(imagen_metadata, imagen_b)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+def not_imagen(imagen_metadata):
+    respuesta = procesadorImagen.not_imagen(imagen_metadata)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+# --- Wrappers de operaciones relacionales ---
+
+def relacional_mayor(imagen_metadata, umbral):
+    respuesta = procesadorImagen.relacional_mayor(imagen_metadata, umbral)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+def relacional_menor(imagen_metadata, umbral):
+    respuesta = procesadorImagen.relacional_menor(imagen_metadata, umbral)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+def relacional_igual(imagen_metadata, umbral):
+    respuesta = procesadorImagen.relacional_igual(imagen_metadata, umbral)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+    else:
+        print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    return imagen_metadata
+
+
+def submenu_operaciones_logicas(imagen_metadata):
+    """
+    Submenú para operaciones lógicas y relacionales.
+    Lógicas (AND/OR/XOR/NOT): operan sobre imágenes binarias.
+    Relacionales (>/</==): comparan intensidad de grises contra un umbral escalar.
+    """
+    print("\n--- Operaciones Lógicas y Relacionales ---")
+    print(" Lógicas (requieren imagen B):")
+    print("  1. AND  — blanco donde AMBAS tienen blanco")
+    print("  2. OR   — blanco donde AL MENOS UNA tiene blanco")
+    print("  3. XOR  — blanco donde las imágenes son DIFERENTES")
+    print(" Lógica (solo imagen A):")
+    print("  4. NOT  — invierte fondo y objetos")
+    print(" Relacionales (comparan contra umbral):")
+    print("  5. Mayor que  ( > umbral )")
+    print("  6. Menor que  ( < umbral )")
+    print("  7. Igual a    ( == umbral )")
+    print("  8. Cancelar")
+    opcion = input("Selecciona una operación: ").strip()
+
+    if opcion == "8" or opcion == "":
+        print("Operación cancelada.")
+        return imagen_metadata
+
+    # --- Operaciones lógicas con imagen B ---
+    if opcion in ("1", "2", "3"):
+        imagen_b = seleccionar_imagen_secundaria()
+        if imagen_b is None:
+            return imagen_metadata
+        if opcion == "1":
+            imagen_metadata = and_imagenes(imagen_metadata, imagen_b)
+        elif opcion == "2":
+            imagen_metadata = or_imagenes(imagen_metadata, imagen_b)
+        elif opcion == "3":
+            imagen_metadata = xor_imagenes(imagen_metadata, imagen_b)
+
+    # --- NOT: solo imagen A ---
+    elif opcion == "4":
+        imagen_metadata = not_imagen(imagen_metadata)
+
+    # --- Operaciones relacionales con umbral ---
+    elif opcion in ("5", "6", "7"):
+        umbral = solicitar_umbral()
+        if opcion == "5":
+            imagen_metadata = relacional_mayor(imagen_metadata, umbral)
+        elif opcion == "6":
+            imagen_metadata = relacional_menor(imagen_metadata, umbral)
+        elif opcion == "7":
+            imagen_metadata = relacional_igual(imagen_metadata, umbral)
+
+    else:
+        print("[!] Opción inválida.")
+        return imagen_metadata
+
+    mostrar_imagen_opencv(imagen_metadata)
+    return imagen_metadata
+
+def _visualizar_vecindad(imagen_metadata, respuesta, titulo_labels):
+    """
+    Visualiza los resultados de un análisis de vecindad:
+    mapa de etiquetas coloreado + imagen con contornos numerados.
+    """
+    print(f"\n[*] ÉXITO: {respuesta['mensaje']}")
+    labels           = respuesta["labels"]
+    imagen_contornos = respuesta["imagen_contornos"]
+    num_objetos      = respuesta["num_objetos"]
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 5))
+
+    axs[0].imshow(labels, cmap='jet')
+    axs[0].set_title(f'{titulo_labels} — {num_objetos} objeto(s)')
     axs[0].axis('off')
-    axs[1].imshow(imagen_ruido, cmap='gray')
-    axs[1].set_title('Ruido gaussiano')
+
+    axs[1].imshow(cv2.cvtColor(imagen_contornos, cv2.COLOR_BGR2RGB))
+    axs[1].set_title(f'Contornos numerados | [{imagen_metadata.nombre}]')
     axs[1].axis('off')
+
     plt.tight_layout()
     plt.show()
+    input("\nPresiona ENTER para continuar...")
 
-    return imagen_ruido
 
-def operaciones_aritmeticas(imagen_metadata):
-    # Operaciones aritméticas 
-    # Modificar este metodo para realizar las operaciones aritmeticas entre dos imagenes
-    # ya que actualmente solo las esta realizando para una sola imagen
+def analizar_vecindad_4(imagen_metadata):
+    respuesta = procesadorImagen.analizar_vecindad_4(imagen_metadata)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+        return imagen_metadata
+    _visualizar_vecindad(imagen_metadata, respuesta, "Vecindad-4")
+    return imagen_metadata
 
-    suma = cv2.add(imagen_metadata.datos, 50) # Suma un escalar
-    resta = cv2.subtract(imagen_metadata.datos, 50) # Resta un escalar
-    multiplicacion = cv2.multiply(imagen_metadata.datos, 1.2) # Multiplica por un escalar
 
-    # Mostrar resultados
-    cv2.imshow('Imagen Original', imagen_metadata.datos)
-    cv2.imshow('Imagen Suma', suma)
-    cv2.imshow('Imagen Resta', resta)
-    cv2.imshow('Imagen Multiplicación', multiplicacion)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+def analizar_vecindad_8(imagen_metadata):
+    respuesta = procesadorImagen.analizar_vecindad_8(imagen_metadata)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        print(f"\n[!] ERROR: {respuesta['mensaje']}")
+        return imagen_metadata
+    _visualizar_vecindad(imagen_metadata, respuesta, "Vecindad-8")
+    return imagen_metadata
 
-def operaciones_logicas():
-    # Cargar dos imágenes
-    img1 = cv2.imread(os.path.join(config.script_dir_parent, 'resources\\input\\estrella_naranja.jpeg'))
-    img2 = cv2.imread(os.path.join(config.script_dir_parent, 'resources\\input\\estrella_verde.jpeg'))
 
-    # Asegurarse de que las imágenes tengan el mismo tamaño
-    img1 = cv2.resize(img1, (300, 300))
-    img2 = cv2.resize(img2, (300, 300))
+def submenu_analizar_vecindad(imagen_metadata):
+    """
+    Submenú para el etiquetado de componentes conexas.
+    Permite analizar con vecindad-4, vecindad-8 o comparar ambas en una sola figura.
+    La imagen se binariza automáticamente si no lo está.
+    """
+    print("\n--- Etiquetado de Componentes Conexas ---")
+    print(" 1. Vecindad-4  (conexiones ortogonales)")
+    print(" 2. Vecindad-8  (ortogonales + diagonales)")
+    print(" 3. Comparar ambas")
+    print(" 4. Cancelar")
+    opcion = input("Selecciona una opción: ").strip()
 
-    # Operaciones lógicas
-    and_img = cv2.bitwise_and(img1, img2)
-    or_img = cv2.bitwise_or(img1, img2)
-    xor_img = cv2.bitwise_xor(img1, img2)
+    if opcion == "4" or opcion == "":
+        print("Operación cancelada.")
+        return imagen_metadata
 
-    # Mostrar resultados
-    cv2.imshow('Imagen AND', and_img)
-    cv2.imshow('Imagen OR', or_img)
-    cv2.imshow('Imagen XOR', xor_img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    if opcion not in ("1", "2", "3"):
+        print("[!] Opción inválida.")
+        return imagen_metadata
 
+    if opcion == "1":
+        imagen_metadata = analizar_vecindad_4(imagen_metadata)
+
+    elif opcion == "2":
+        imagen_metadata = analizar_vecindad_8(imagen_metadata)
+
+    elif opcion == "3":
+        # Obtener resultados de ambas vecindades
+        resp4 = procesadorImagen.analizar_vecindad_4(imagen_metadata)
+        resp8 = procesadorImagen.analizar_vecindad_8(imagen_metadata)
+
+        if resp4["error"]:
+            print(f"\n[!] ERROR vecindad-4: {resp4['mensaje']}")
+            return imagen_metadata
+        if resp8["error"]:
+            print(f"\n[!] ERROR vecindad-8: {resp8['mensaje']}")
+            return imagen_metadata
+
+        imagen_metadata = resp8["objeto"]  # persiste el estado de la última operación
+
+        n4 = resp4["num_objetos"]
+        n8 = resp8["num_objetos"]
+        print(f"\n[*] Vecindad-4: {n4} objeto(s)  |  Vecindad-8: {n8} objeto(s)")
+        print(f"    Diferencia: {abs(n4 - n8)} objeto(s)")
+
+        # Figura comparativa de 2×2: etiquetas y contornos de cada vecindad
+        fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle(
+            f'Comparación de Vecindad | [{imagen_metadata.nombre}]',
+            fontsize=13
+        )
+
+        axs[0, 0].imshow(resp4["labels"], cmap='jet')
+        axs[0, 0].set_title(f'Vecindad-4 — mapa de etiquetas ({n4} obj.)')
+        axs[0, 0].axis('off')
+
+        axs[0, 1].imshow(cv2.cvtColor(resp4["imagen_contornos"], cv2.COLOR_BGR2RGB))
+        axs[0, 1].set_title('Vecindad-4 — contornos numerados')
+        axs[0, 1].axis('off')
+
+        axs[1, 0].imshow(resp8["labels"], cmap='jet')
+        axs[1, 0].set_title(f'Vecindad-8 — mapa de etiquetas ({n8} obj.)')
+        axs[1, 0].axis('off')
+
+        axs[1, 1].imshow(cv2.cvtColor(resp8["imagen_contornos"], cv2.COLOR_BGR2RGB))
+        axs[1, 1].set_title('Vecindad-8 — contornos numerados')
+        axs[1, 1].axis('off')
+
+        plt.tight_layout()
+        plt.show()
+        input("\nPresiona ENTER para continuar...")
+
+    return imagen_metadata
+    
 def menu_principal():
     global ruta_imagen, imagen_actual, imagen_metadata
     
@@ -472,17 +570,16 @@ def menu_principal():
         print(f" Estado en memoria: [{imagen_metadata.modelo}]")
         print("-" * 40)
         print(" 1. Seleccionar nueva imagen.")
-        print(" 2. Aplicar ruido: Sal y Pimienta.")
-        print(" 3. Aplicar ruido: Gaussiano.")
-        print(" 4. Operaciones Aritméticas.")
-        print(" 5. Binarizar imagen (Otsu)")
-        print(" 6. Operaciones Lógicas.")
-        print(" 7. Convertir a modelo CMY.")
-        print(" 8. Convertir a modelo YIQ.")
-        print(" 9. Convertir a modelo HSI.")
-        print(" 10. Calcular Histograma Automático (RGB, GRIS, HSV, ETC).")
-        print(" 11. RESTABLECER IMAGEN ORIGINAL.")
-        print(" 12. Salir.")
+        print(" 2. Binarizar imagen (Umbral personalizado).")
+        print(" 3. Binarizar imagen (Otsu)")
+        print(" 4. Aplicar ruido: Sal.")
+        print(" 5. Aplicar ruido: Pimienta.")
+        print(" 6. Aplicar ruido: Gaussiano.")
+        print(" 7. Operaciones Aritméticas.")
+        print(" 8. Operaciones Lógicas.")
+        print(" 9. Analizar vecindad(4 y 8)")
+        print(" 10. RESTABLECER IMAGEN ORIGINAL.")
+        print(" 11. Salir.")
         print("="*40)
         
         opcion = input("Selecciona una Opción: ").strip()
@@ -495,51 +592,44 @@ def menu_principal():
             imagen_metadata = cargar_imagen_rgb_opencv(imagen_metadata)
             mostrar_imagen_opencv(imagen_metadata)
         
-        elif opcion == "11":
+        elif opcion == "10":
             # Recarga el archivo original descartando cambios previos
             imagen_metadata = cargar_imagen_rgb_opencv(imagen_metadata)
             mostrar_imagen_opencv(imagen_metadata)
 
         # --- PROCESAMIENTO ---
-
         elif opcion == "2":
-            # Aplicar ruido sal y pimienta a una imagen en escala de grises
-            imagen_sal_pimienta = agregar_ruido_sal_pimienta(imagen_metadata, cantidad=0.02)
+            umbral_usuario = solicitar_umbral()
+            imagen_metadata = binarizar_imagen(imagen_metadata, umbral_usuario)
+            mostrar_imagen_opencv(imagen_metadata)
 
         elif opcion == "3":
-            # Aplicar ruido gaussiano a una imagen en escala de grises
-            imagen_gaussiana = agregar_ruido_gaussiano(imagen_metadata, media=0, sigma=20)
-
-        elif opcion == "4":
-            # Aplicamos operaciones aritmeticas
-            operaciones_aritmeticas(imagen_metadata)
-        
-        elif opcion == "5":
             imagen_metadata = binarizar_imagen_otsu(imagen_metadata)
             mostrar_imagen_opencv(imagen_metadata)
 
+        elif opcion == "4":
+            imagen_metadata = agregar_ruido_sal(imagen_metadata, cantidad=0.5)
+            mostrar_imagen_opencv(imagen_metadata)
+
+        elif opcion == "5":
+            imagen_metadata = agregar_ruido_pimienta(imagen_metadata, cantidad=0.5)
+            mostrar_imagen_opencv(imagen_metadata)
+
         elif opcion == "6":
-            # Aplicamos operaciones lógicas
-            operaciones_logicas()
+            imagen_metadata = agregar_ruido_gaussiano(imagen_metadata, media=0, sigma=20)
+            mostrar_imagen_opencv(imagen_metadata)
 
         elif opcion == "7":
-            imagen_actual = convertir_a_cmy(imagen_metadata)
-            mostrar_imagen_opencv(imagen_metadata)
-        
+            imagen_metadata = submenu_operaciones_aritmeticas(imagen_metadata)
+
         elif opcion == "8":
-            imagen_actual = convertir_a_yiq(imagen_metadata)
-            mostrar_imagen_opencv(imagen_metadata)
+            imagen_metadata = submenu_operaciones_logicas(imagen_metadata)
 
         elif opcion == "9":
-            imagen_actual = convertir_a_hsi(imagen_metadata)
-            mostrar_imagen_opencv(imagen_metadata)
-
-        # --- ANÁLISIS ---
-        elif opcion == "10":
-            imagen_metadata = calcular_histograma_automatico(imagen_metadata)
-
+            imagen_metadata = submenu_analizar_vecindad(imagen_metadata)
+        
         # --- SALIDA ---
-        elif opcion == "12" or opcion.upper() == "SALIR":
+        elif opcion == "11" or opcion.upper() == "SALIR":
             print(" Saliendo del programa...")
             break
         else:
@@ -547,4 +637,3 @@ def menu_principal():
 
 if __name__ == "__main__":
     menu_principal()
-

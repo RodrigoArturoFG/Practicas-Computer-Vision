@@ -307,6 +307,588 @@ def calcular_estadisticas_canales(datos_imagen, nombres_canales):
         }
     return resultados
 
+# ══════════════════════════════════════════════════════════════
+#  RUIDO
+# ══════════════════════════════════════════════════════════════
+
+def _preparar_imagen_binaria(imagen_metadata):
+    """
+    Helper centralizado: garantiza que imagen_metadata esté en modelo BINARIO
+    limpio antes de cualquier operación que lo requiera (ruido, vecindad, lógicas).
+
+    Lógica canónica:
+      - Ya es BINARIO → recarga desde disco y re-aplica imagen_metadata.umbral,
+        que puede ser un valor elegido por el usuario desde la UI. De este modo
+        el umbral que el usuario seleccionó se respeta en todas las operaciones
+        posteriores y no se sobreescribe con uno automático.
+      - Cualquier otro modelo → binariza con Otsu (umbral óptimo automático)
+        y guarda el valor calculado en imagen_metadata.umbral.
+
+    En ambos casos la imagen se recarga desde disco para descartar cualquier
+    ruido o modificación acumulada en memoria.
+
+    Retorna: wrapper_respuesta con imagen_metadata en modelo BINARIO.
+    """
+    if es_binaria(imagen_metadata):
+        # Respetar el umbral elegido por el usuario (o 128 si nunca se definió)
+        umbral_previo = imagen_metadata.umbral if imagen_metadata.umbral is not None else 128
+
+        # Reset temporal a "RGB" para que cargar_imagen_opencv_gris no rechace
+        # la imagen por ya ser monocromática (GRIS o BINARIO).
+        imagen_metadata.modelo = "RGB"
+        respuesta_gris = cargar_imagen_opencv_gris(imagen_metadata)
+        imagen_metadata = respuesta_gris["objeto"]
+        if respuesta_gris["error"]:
+            return respuesta_gris
+
+        respuesta_bin = conversion_imagen_opencv_binaria(imagen_metadata, umbral_previo)
+        imagen_metadata = respuesta_bin["objeto"]
+        if respuesta_bin["error"]:
+            return respuesta_bin
+
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Imagen binaria recargada limpia (umbral={umbral_previo})"
+        )
+    else:
+        # Primera vez que se binariza: Otsu calcula el umbral óptimo y lo guarda
+        respuesta_otsu = conversion_imagen_opencv_otsu(imagen_metadata)
+        imagen_metadata = respuesta_otsu["objeto"]
+        if respuesta_otsu["error"]:
+            return respuesta_otsu
+
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Imagen binarizada con Otsu (umbral={imagen_metadata.umbral})"
+        )
+
+
+def _preparar_imagen_gris(imagen_metadata):
+    """
+    Garantiza que imagen_metadata tenga datos en escala de grises limpios
+    (sin ruido acumulado) antes de aplicar ruido gaussiano.
+
+    Casos:
+      - Ya es GRIS   : recarga desde disco para descartar ruido previo.
+      - Es BINARIO   : recarga desde disco como gris (la naturaleza binaria
+                       se pierde al aplicar gaussiano, esto es esperado).
+      - Cualquier otro modelo (RGB, HSV, etc.): convierte a gris directamente.
+
+    Retorna: wrapper_respuesta con imagen_metadata en modelo GRIS.
+    """
+    if es_modelo_monocromatico(imagen_metadata.modelo):
+        # Resetear modelo a "RGB" para que cargar_imagen_opencv_gris
+        # no rechace la imagen por ya ser monocromática.
+        imagen_metadata.modelo = "RGB"
+
+    respuesta_gris = cargar_imagen_opencv_gris(imagen_metadata)
+    imagen_metadata = respuesta_gris["objeto"]
+    if respuesta_gris["error"]:
+        return respuesta_gris
+
+    return wrapper_respuesta(imagen_metadata, True, "Imagen preparada en escala de grises.")
+
+
+def agregar_ruido_gaussiano(imagen_metadata, media=0, sigma=20):
+    """
+    Agrega ruido gaussiano a una imagen en escala de grises.
+    Si la imagen es color o binaria, la convierte a grises automáticamente.
+    Si ya era gris o binaria, la recarga desde disco para no acumular ruido previo.
+    El modelo resultante siempre es GRIS (el ruido gaussiano destruye la naturaleza binaria).
+    Persiste el resultado en imagen_metadata.datos.
+    Retorna: wrapper_respuesta con imagen_metadata actualizado.
+    """
+    # 1. Validar que haya datos cargados
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+
+    # 2. Garantizar imagen en escala de grises limpia (sin ruido acumulado)
+    respuesta = _preparar_imagen_gris(imagen_metadata)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        return respuesta
+
+    # 3. Aplicar ruido gaussiano
+    try:
+        # Generar ruido con distribución normal y sumarlo a la imagen
+        # int16 para evitar overflow durante la suma antes del clip
+        gauss = np.random.normal(media, sigma, imagen_metadata.datos.shape).astype(np.int16)
+        imagen_ruido = imagen_metadata.datos.astype(np.int16) + gauss
+        imagen_ruido = np.clip(imagen_ruido, 0, 255).astype(np.uint8)
+
+        # 4. Persistir resultado (modelo permanece GRIS)
+        imagen_metadata.datos = imagen_ruido
+
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Ruido gaussiano aplicado (media={media}, sigma={sigma})"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error al aplicar ruido gaussiano: {str(e)}")
+
+
+def agregar_ruido_sal(imagen_metadata, cantidad=0.02):
+    """
+    Agrega ruido SAL (píxeles en 255) sobre una imagen binaria limpia.
+    Si la imagen no es binaria, aplica Otsu automáticamente.
+    Si ya era binaria, la recarga desde disco para no acumular ruido previo.
+    Persiste el resultado en imagen_metadata.datos.
+    Retorna: wrapper_respuesta con imagen_metadata actualizado.
+    """
+    # 1. Validar que haya datos cargados
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+
+    # 2. Garantizar imagen binaria limpia (sin ruido acumulado)
+    respuesta = _preparar_imagen_binaria(imagen_metadata)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        return respuesta
+
+    # 3. Aplicar ruido SAL (solo píxeles blancos = 255)
+    try:
+        imagen_ruido = imagen_metadata.datos.copy()
+        filas, columnas = imagen_ruido.shape       # Seguro: imagen ya es 2D (BINARIO)
+        num_pixeles_ruido = int(cantidad * filas * columnas)
+
+        filas_rand = np.random.randint(0, filas,    num_pixeles_ruido)
+        cols_rand  = np.random.randint(0, columnas, num_pixeles_ruido)
+        imagen_ruido[filas_rand, cols_rand] = 255  # SAL → blanco
+
+        # 4. Persistir resultado
+        imagen_metadata.datos = imagen_ruido
+
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Ruido SAL aplicado — {num_pixeles_ruido} píxeles afectados ({cantidad*100:.1f}%)"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error al aplicar ruido SAL: {str(e)}")
+
+
+def agregar_ruido_pimienta(imagen_metadata, cantidad=0.02):
+    """
+    Agrega ruido PIMIENTA (píxeles en 0) sobre una imagen binaria limpia.
+    Si la imagen no es binaria, aplica Otsu automáticamente.
+    Si ya era binaria, la recarga desde disco para no acumular ruido previo.
+    Persiste el resultado en imagen_metadata.datos.
+    Retorna: wrapper_respuesta con imagen_metadata actualizado.
+    """
+    # 1. Validar que haya datos cargados
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+
+    # 2. Garantizar imagen binaria limpia (sin ruido acumulado)
+    respuesta = _preparar_imagen_binaria(imagen_metadata)
+    imagen_metadata = respuesta["objeto"]
+    if respuesta["error"]:
+        return respuesta
+
+    # 3. Aplicar ruido PIMIENTA (solo píxeles negros = 0)
+    try:
+        imagen_ruido = imagen_metadata.datos.copy()
+        filas, columnas = imagen_ruido.shape       # Seguro: imagen ya es 2D (BINARIO)
+        num_pixeles_ruido = int(cantidad * filas * columnas)
+
+        filas_rand = np.random.randint(0, filas,    num_pixeles_ruido)
+        cols_rand  = np.random.randint(0, columnas, num_pixeles_ruido)
+        imagen_ruido[filas_rand, cols_rand] = 0    # PIMIENTA → negro
+
+        # 4. Persistir resultado
+        imagen_metadata.datos = imagen_ruido
+
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Ruido PIMIENTA aplicado — {num_pixeles_ruido} píxeles afectados ({cantidad*100:.1f}%)"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error al aplicar ruido PIMIENTA: {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════
+#  OPERACIONES ARITMÉTICAS
+# ══════════════════════════════════════════════════════════════
+
+def _preparar_par_imagenes(imagen_a, imagen_b):
+    """
+    Normaliza el par de imágenes para que sean compatibles antes de
+    cualquier operación aritmética o lógica entre dos imágenes:
+      1. Convierte imagen_b al mismo modelo de color que imagen_a.
+      2. Redimensiona imagen_b al mismo tamaño que imagen_a.
+
+    No modifica imagen_a. Devuelve los datos de imagen_b ya ajustados
+    como un array NumPy listo para operar.
+
+    Retorna: (datos_b_ajustados, error:bool, mensaje:str)
+    """
+    if imagen_a.datos is None or imagen_b.datos is None:
+        return None, True, "Ambas imágenes deben estar cargadas."
+
+    datos_b = imagen_b.datos.copy()
+
+    # 1. Igualar número de canales (modelo de color)
+    canales_a = 1 if len(imagen_a.datos.shape) == 2 else imagen_a.datos.shape[2]
+    canales_b = 1 if len(datos_b.shape) == 2        else datos_b.shape[2]
+
+    if canales_a != canales_b:
+        if canales_a == 1:
+            # A es gris/binaria → convertir B a gris
+            datos_b = cv2.cvtColor(datos_b, cv2.COLOR_BGR2GRAY) if canales_b == 3 else datos_b
+        else:
+            # A es color → convertir B a color (gris → BGR → igualar canales)
+            if canales_b == 1:
+                datos_b = cv2.cvtColor(datos_b, cv2.COLOR_GRAY2BGR)
+
+    # 2. Igualar tamaño (redimensionar B al tamaño de A)
+    alto_a, ancho_a = imagen_a.datos.shape[:2]
+    alto_b, ancho_b = datos_b.shape[:2]
+    if (alto_a, ancho_a) != (alto_b, ancho_b):
+        datos_b = cv2.resize(datos_b, (ancho_a, alto_a), interpolation=cv2.INTER_LINEAR)
+
+    return datos_b, False, "Par de imágenes preparado correctamente."
+
+
+def sumar_imagenes(imagen_a, imagen_b):
+    """
+    Suma imagen_a e imagen_b píxel a píxel con saturación en 255.
+    El resultado se guarda en imagen_a.datos.
+    Retorna: wrapper_respuesta con imagen_a actualizada.
+    """
+    datos_b, error, mensaje = _preparar_par_imagenes(imagen_a, imagen_b)
+    if error:
+        return wrapper_respuesta(imagen_a, False, mensaje)
+    try:
+        imagen_a.datos = cv2.add(imagen_a.datos, datos_b)
+        return wrapper_respuesta(imagen_a, True, f"Suma aplicada: [{imagen_a.nombre}] + [{imagen_b.nombre}]")
+    except Exception as e:
+        return wrapper_respuesta(imagen_a, False, f"Error en suma: {str(e)}")
+
+
+def restar_imagenes(imagen_a, imagen_b):
+    """
+    Resta imagen_b a imagen_a píxel a píxel con saturación en 0.
+    El resultado se guarda en imagen_a.datos.
+    Retorna: wrapper_respuesta con imagen_a actualizada.
+    """
+    datos_b, error, mensaje = _preparar_par_imagenes(imagen_a, imagen_b)
+    if error:
+        return wrapper_respuesta(imagen_a, False, mensaje)
+    try:
+        imagen_a.datos = cv2.subtract(imagen_a.datos, datos_b)
+        return wrapper_respuesta(imagen_a, True, f"Resta aplicada: [{imagen_a.nombre}] - [{imagen_b.nombre}]")
+    except Exception as e:
+        return wrapper_respuesta(imagen_a, False, f"Error en resta: {str(e)}")
+
+
+def multiplicar_imagenes(imagen_a, imagen_b):
+    """
+    Multiplica imagen_a e imagen_b píxel a píxel.
+    Normaliza dividiendo entre 255 para que el resultado permanezca en [0, 255]
+    (sin normalización, el producto de dos uint8 se satura a 255 en casi todos los píxeles).
+    El resultado se guarda en imagen_a.datos.
+    Retorna: wrapper_respuesta con imagen_a actualizada.
+    """
+    datos_b, error, mensaje = _preparar_par_imagenes(imagen_a, imagen_b)
+    if error:
+        return wrapper_respuesta(imagen_a, False, mensaje)
+    try:
+        # Normalizar a [0,1] → multiplicar → escalar de vuelta a [0,255]
+        a_norm = imagen_a.datos.astype(np.float32) / 255.0
+        b_norm = datos_b.astype(np.float32)        / 255.0
+        resultado = np.clip(a_norm * b_norm * 255.0, 0, 255).astype(np.uint8)
+        imagen_a.datos = resultado
+        return wrapper_respuesta(imagen_a, True, f"Multiplicación aplicada: [{imagen_a.nombre}] × [{imagen_b.nombre}]")
+    except Exception as e:
+        return wrapper_respuesta(imagen_a, False, f"Error en multiplicación: {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════
+#  OPERACIONES LÓGICAS Y RELACIONALES
+# ══════════════════════════════════════════════════════════════
+
+def _preparar_par_logico(imagen_a, imagen_b):
+    """
+    Prepara el par de imágenes para operaciones lógicas (AND, OR, XOR):
+      1. Binariza imagen_a usando _preparar_imagen_binaria (respeta umbral del usuario).
+      2. Binariza imagen_b usando _preparar_imagen_binaria (respeta su umbral si lo tiene).
+      3. Iguala tamaño y canales de B al de A usando _preparar_par_imagenes.
+
+    Retorna: (datos_b_ajustados, error:bool, mensaje:str)
+    """
+    if imagen_a.datos is None or imagen_b.datos is None:
+        return None, True, "Ambas imágenes deben estar cargadas."
+
+    # Binarizar A respetando umbral del usuario (helper canónico)
+    respuesta_a = _preparar_imagen_binaria(imagen_a)
+    imagen_a.datos  = respuesta_a["objeto"].datos
+    imagen_a.modelo = respuesta_a["objeto"].modelo
+    imagen_a.umbral = respuesta_a["objeto"].umbral
+    if respuesta_a["error"]:
+        return None, True, f"No se pudo binarizar imagen A: {respuesta_a['mensaje']}"
+
+    # Binarizar B temporalmente con el mismo helper (respeta su umbral si lo tiene)
+    respuesta_b = _preparar_imagen_binaria(imagen_b)
+    if respuesta_b["error"]:
+        return None, True, f"No se pudo binarizar imagen B: {respuesta_b['mensaje']}"
+    imagen_b_temp = respuesta_b["objeto"]
+
+    # Igualar tamaño y canales de B al de A
+    datos_b, error, mensaje = _preparar_par_imagenes(imagen_a, imagen_b_temp)
+    return datos_b, error, mensaje
+
+
+def and_imagenes(imagen_a, imagen_b):
+    """
+    AND bit a bit entre imagen_a e imagen_b binarias.
+    Resultado: píxel blanco solo donde AMBAS imágenes tienen píxel blanco.
+    Retorna: wrapper_respuesta con imagen_a actualizada.
+    """
+    datos_b, error, mensaje = _preparar_par_logico(imagen_a, imagen_b)
+    if error:
+        return wrapper_respuesta(imagen_a, False, mensaje)
+    try:
+        imagen_a.datos = cv2.bitwise_and(imagen_a.datos, datos_b)
+        return wrapper_respuesta(imagen_a, True, f"AND aplicado: [{imagen_a.nombre}] AND [{imagen_b.nombre}]")
+    except Exception as e:
+        return wrapper_respuesta(imagen_a, False, f"Error en AND: {str(e)}")
+
+
+def or_imagenes(imagen_a, imagen_b):
+    """
+    OR bit a bit entre imagen_a e imagen_b binarias.
+    Resultado: píxel blanco donde AL MENOS UNA imagen tiene píxel blanco.
+    Retorna: wrapper_respuesta con imagen_a actualizada.
+    """
+    datos_b, error, mensaje = _preparar_par_logico(imagen_a, imagen_b)
+    if error:
+        return wrapper_respuesta(imagen_a, False, mensaje)
+    try:
+        imagen_a.datos = cv2.bitwise_or(imagen_a.datos, datos_b)
+        return wrapper_respuesta(imagen_a, True, f"OR aplicado: [{imagen_a.nombre}] OR [{imagen_b.nombre}]")
+    except Exception as e:
+        return wrapper_respuesta(imagen_a, False, f"Error en OR: {str(e)}")
+
+
+def xor_imagenes(imagen_a, imagen_b):
+    """
+    XOR bit a bit entre imagen_a e imagen_b binarias.
+    Resultado: píxel blanco donde las imágenes son DIFERENTES entre sí.
+    Retorna: wrapper_respuesta con imagen_a actualizada.
+    """
+    datos_b, error, mensaje = _preparar_par_logico(imagen_a, imagen_b)
+    if error:
+        return wrapper_respuesta(imagen_a, False, mensaje)
+    try:
+        imagen_a.datos = cv2.bitwise_xor(imagen_a.datos, datos_b)
+        return wrapper_respuesta(imagen_a, True, f"XOR aplicado: [{imagen_a.nombre}] XOR [{imagen_b.nombre}]")
+    except Exception as e:
+        return wrapper_respuesta(imagen_a, False, f"Error en XOR: {str(e)}")
+
+
+def not_imagen(imagen_a):
+    """
+    NOT bit a bit sobre imagen_a (inversión de píxeles).
+    Binariza con Otsu si no es binaria.
+    Resultado: fondo y objetos se intercambian.
+    Retorna: wrapper_respuesta con imagen_a actualizada.
+    """
+    if imagen_a.datos is None:
+        return wrapper_respuesta(imagen_a, False, "No hay imagen cargada.")
+    try:
+        # Binarizar si no lo es
+        if not es_binaria(imagen_a):
+            respuesta = conversion_imagen_opencv_otsu(imagen_a)
+            imagen_a = respuesta["objeto"]
+            if respuesta["error"]:
+                return respuesta
+        imagen_a.datos = cv2.bitwise_not(imagen_a.datos)
+        return wrapper_respuesta(imagen_a, True, f"NOT aplicado: [{imagen_a.nombre}]")
+    except Exception as e:
+        return wrapper_respuesta(imagen_a, False, f"Error en NOT: {str(e)}")
+
+
+# --- Operaciones relacionales ---
+# Comparan la intensidad de cada píxel contra un umbral escalar.
+# La imagen de entrada debe ser en escala de grises (convierte automáticamente).
+# El resultado es siempre una máscara binaria útil para segmentación.
+
+def _preparar_imagen_para_relacional(imagen_metadata):
+    """
+    Garantiza que la imagen esté en escala de grises para las operaciones relacionales.
+    Si es BINARIO o GRIS recarga desde disco limpio; si es color convierte a gris.
+    Retorna: wrapper_respuesta con imagen en modelo GRIS.
+    """
+    if es_modelo_monocromatico(imagen_metadata.modelo):
+        imagen_metadata.modelo = "RGB"   # reset para saltar la guardia de cargar_gris
+    return cargar_imagen_opencv_gris(imagen_metadata)
+
+
+def relacional_mayor(imagen_metadata, umbral):
+    """
+    Segmenta los píxeles cuya intensidad es MAYOR que el umbral.
+    Resultado: máscara binaria — blanco donde píxel > umbral, negro en el resto.
+    Retorna: wrapper_respuesta con imagen_metadata actualizada (modelo BINARIO).
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    try:
+        respuesta = _preparar_imagen_para_relacional(imagen_metadata)
+        imagen_metadata = respuesta["objeto"]
+        if respuesta["error"]:
+            return respuesta
+
+        mascara = (imagen_metadata.datos > umbral).astype(np.uint8) * 255
+        imagen_metadata.datos  = mascara
+        imagen_metadata.modelo = "BINARIO"
+        imagen_metadata.umbral = umbral
+        return wrapper_respuesta(imagen_metadata, True, f"Relacional '>' aplicado (umbral={umbral})")
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en relacional '>': {str(e)}")
+
+
+def relacional_menor(imagen_metadata, umbral):
+    """
+    Segmenta los píxeles cuya intensidad es MENOR que el umbral.
+    Resultado: máscara binaria — blanco donde píxel < umbral, negro en el resto.
+    Retorna: wrapper_respuesta con imagen_metadata actualizada (modelo BINARIO).
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    try:
+        respuesta = _preparar_imagen_para_relacional(imagen_metadata)
+        imagen_metadata = respuesta["objeto"]
+        if respuesta["error"]:
+            return respuesta
+
+        mascara = (imagen_metadata.datos < umbral).astype(np.uint8) * 255
+        imagen_metadata.datos  = mascara
+        imagen_metadata.modelo = "BINARIO"
+        imagen_metadata.umbral = umbral
+        return wrapper_respuesta(imagen_metadata, True, f"Relacional '<' aplicado (umbral={umbral})")
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en relacional '<': {str(e)}")
+
+
+def relacional_igual(imagen_metadata, umbral):
+    """
+    Segmenta los píxeles cuya intensidad es IGUAL al umbral.
+    Resultado: máscara binaria — blanco donde píxel == umbral, negro en el resto.
+    Útil para aislar un nivel de intensidad exacto.
+    Retorna: wrapper_respuesta con imagen_metadata actualizada (modelo BINARIO).
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    try:
+        respuesta = _preparar_imagen_para_relacional(imagen_metadata)
+        imagen_metadata = respuesta["objeto"]
+        if respuesta["error"]:
+            return respuesta
+
+        mascara = (imagen_metadata.datos == umbral).astype(np.uint8) * 255
+        imagen_metadata.datos  = mascara
+        imagen_metadata.modelo = "BINARIO"
+        imagen_metadata.umbral = umbral
+        return wrapper_respuesta(imagen_metadata, True, f"Relacional '==' aplicado (umbral={umbral})")
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en relacional '==': {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════
+#  ETIQUETADO DE COMPONENTES CONEXAS (VECINDAD)
+# ══════════════════════════════════════════════════════════════
+
+def _etiquetar_y_dibujar(imagen_binaria, connectivity):
+    """
+    Aplica connectedComponents y dibuja contornos numerados sobre una copia en color.
+    Retorna: (num_objetos, labels, imagen_contornos_BGR)
+    """
+    num_labels, labels = cv2.connectedComponents(imagen_binaria, connectivity=connectivity)
+    num_objetos = num_labels - 1  # excluir el fondo (etiqueta 0)
+
+    imagen_contornos = cv2.cvtColor(imagen_binaria, cv2.COLOR_GRAY2BGR)
+    contours, _ = cv2.findContours(imagen_binaria, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    for i, contour in enumerate(contours):
+        cv2.drawContours(imagen_contornos, [contour], -1, (0, 255, 0), 2)
+        x, y, w, h = cv2.boundingRect(contour)
+        cv2.putText(
+            imagen_contornos, f'Obj {i + 1}',
+            (x, max(y - 10, 10)),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1
+        )
+
+    return num_objetos, labels, imagen_contornos
+
+
+def analizar_vecindad_4(imagen_metadata):
+    """
+    Etiqueta componentes conexas usando vecindad-4 (solo conexiones ortogonales).
+    Binariza la imagen automáticamente si no lo es.
+    Retorna wrapper_respuesta con claves adicionales:
+      - 'num_objetos': int
+      - 'labels':     array NumPy con etiquetas por píxel
+      - 'imagen_contornos': array BGR con contornos y números dibujados
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    try:
+        respuesta = _preparar_imagen_binaria(imagen_metadata)
+        imagen_metadata = respuesta["objeto"]
+        if respuesta["error"]:
+            return respuesta
+
+        num_objetos, labels, imagen_contornos = _etiquetar_y_dibujar(
+            imagen_metadata.datos, connectivity=4
+        )
+        resultado = wrapper_respuesta(
+            imagen_metadata, True,
+            f"Vecindad-4: {num_objetos} objeto(s) detectado(s) en [{imagen_metadata.nombre}]"
+        )
+        resultado["num_objetos"]      = num_objetos
+        resultado["labels"]           = labels
+        resultado["imagen_contornos"] = imagen_contornos
+        return resultado
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en vecindad-4: {str(e)}")
+
+
+def analizar_vecindad_8(imagen_metadata):
+    """
+    Etiqueta componentes conexas usando vecindad-8 (conexiones ortogonales + diagonales).
+    Detecta más conexiones que vecindad-4, útil para objetos con bordes diagonales.
+    Binariza la imagen automáticamente si no lo es.
+    Retorna wrapper_respuesta con claves adicionales:
+      - 'num_objetos': int
+      - 'labels':     array NumPy con etiquetas por píxel
+      - 'imagen_contornos': array BGR con contornos y números dibujados
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    try:
+        respuesta = _preparar_imagen_binaria(imagen_metadata)
+        imagen_metadata = respuesta["objeto"]
+        if respuesta["error"]:
+            return respuesta
+
+        num_objetos, labels, imagen_contornos = _etiquetar_y_dibujar(
+            imagen_metadata.datos, connectivity=8
+        )
+        resultado = wrapper_respuesta(
+            imagen_metadata, True,
+            f"Vecindad-8: {num_objetos} objeto(s) detectado(s) en [{imagen_metadata.nombre}]"
+        )
+        resultado["num_objetos"]      = num_objetos
+        resultado["labels"]           = labels
+        resultado["imagen_contornos"] = imagen_contornos
+        return resultado
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en vecindad-8: {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════
+#  HELPERS — VALIDACIÓN DE MODELO
+# ══════════════════════════════════════════════════════════════
+
 # Verifica si la imagen tiene un modelo monoromatico
 def es_modelo_monocromatico(tipo_modelo):
     if tipo_modelo in modelos_monocromaticos:
@@ -325,10 +907,10 @@ def es_binaria(imagen_metadata):
     else:
         return False
     """
-    if imagen_metadata.modelo == "BINARIO": 
-        return True 
+    if imagen_metadata.modelo == "BINARIO":
+        return True
     else:
-        False
+        return False  # FIXED: faltaba 'return'
 
 def es_RGB(imagen_metadata):
     if imagen_metadata.modelo == "RGB":
