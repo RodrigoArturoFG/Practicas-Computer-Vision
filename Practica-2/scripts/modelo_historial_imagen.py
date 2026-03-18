@@ -14,3 +14,5 @@ class metadataHistorialImagen:
         self.thumbnail = None    # Array de NumPy (así se guarda la información de la miniatura de la imagen)
         self.umbral = None   # El valor numérico del umbral que se utilizó para binarización
         self.histograma = {} # Diccionario: {'Canal': {'Media': 0.0, ...}}
+        self.es_derivable = True  # True: se puede reconstruir desde disco + metadatos
+        self.datos = None         # Array NumPy — solo se guarda cuando es_derivable=False

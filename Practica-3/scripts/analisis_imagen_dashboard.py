@@ -338,7 +338,8 @@ class VentanaDashboard(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.imagen_metadata = None
+        self.imagen_metadata   = None
+        self.imagen_metadata_b = None  # Imagen secundaria persistente para operaciones entre dos imágenes
         self._datos_originales = None
         self.historial_estados = []  # Lista de metadataHistorialImagen
         self._inicializar_cache()
@@ -395,21 +396,6 @@ class VentanaDashboard(QMainWindow):
         self.chip_archivo = QLabel("sin archivo")
         self.chip_archivo.setObjectName("chip_b")
 
-        btn_reset = QPushButton("↺  Restablecer")
-        btn_reset.setCursor(Qt.PointingHandCursor)
-        btn_reset.clicked.connect(self.restablecer_imagen)
-        btn_reset.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                border: 1px solid {C['danger']};
-                color: {C['danger']};
-                border-radius: 4px;
-                padding: 4px 14px;
-                font-size: 11pt;
-            }}
-            QPushButton:hover {{ background: {C['danger']}; color: white; }}
-        """)
-
         lbl_modelo = QLabel("MODELO:")
         lbl_modelo.setStyleSheet(f"color:{C['text2']}; font-size:11pt;")
 
@@ -419,8 +405,6 @@ class VentanaDashboard(QMainWindow):
         layout.addWidget(sep)
         layout.addWidget(subtitulo)
         layout.addStretch()
-        layout.addWidget(btn_reset)
-        layout.addSpacing(16)
         layout.addWidget(lbl_modelo)
         layout.addSpacing(6)
         layout.addWidget(self.chip_modelo)
@@ -447,6 +431,48 @@ class VentanaDashboard(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
+        # ── Tabs: Preprocesamiento / Segmentación ──
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: none;
+                background: {C['surface']};
+            }}
+            QTabBar::tab {{
+                background: {C['surface2']};
+                color: {C['text2']};
+                border: 1px solid {C['border']};
+                border-bottom: none;
+                padding: 8px 0px;
+                font-size: 10pt;
+                letter-spacing: 1px;
+                margin-right: 2px;
+                border-radius: 4px 4px 0 0;
+                min-width: 185px;
+            }}
+            QTabBar::tab:selected {{
+                background: {C['surface']};
+                color: {C['accent']};
+                border-color: {C['border2']};
+                border-bottom: 1px solid {C['surface']};
+            }}
+            QTabBar::tab:hover:!selected {{
+                color: {C['text']};
+                background: {C['surface3']};
+            }}
+        """)
+        tabs.addTab(self._make_tab_preprocesamiento(), "PREPROCESAMIENTO")
+        tabs.addTab(self._make_tab_segmentacion(),     "SEGMENTACIÓN")
+        outer.addWidget(tabs, 1)
+
+        # ── Footer fijo: Guardar imagen ─────────────
+        outer.addWidget(self._make_footer_guardar())
+
+        return w
+
+    def _make_tab_preprocesamiento(self):
+        """Contenido de la pestaña Preprocesamiento: archivo, modelo, canales, binarización."""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -458,7 +484,6 @@ class VentanaDashboard(QMainWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
         scroll.setWidget(inner_w)
-        outer.addWidget(scroll, 1)
 
         # ── 1. Cargar imagen ────────────────────
         layout.addWidget(self._section_label("01  ·  ARCHIVO"))
@@ -483,9 +508,9 @@ class VentanaDashboard(QMainWindow):
         layout.addWidget(self.combo_modelo)
 
         btn_modelo = QPushButton("Aplicar Modelo →")
-        btn_modelo.setObjectName("secondary")
         btn_modelo.setCursor(Qt.PointingHandCursor)
         btn_modelo.clicked.connect(self.aplicar_modelo)
+        btn_modelo.setStyleSheet(self._btn_style_accion())
         layout.addWidget(btn_modelo)
 
         layout.addWidget(self._hline())
@@ -495,6 +520,7 @@ class VentanaDashboard(QMainWindow):
         btn_capas = QPushButton("◫  Separar y Visualizar Capas")
         btn_capas.setCursor(Qt.PointingHandCursor)
         btn_capas.clicked.connect(self.mostrar_capas)
+        btn_capas.setStyleSheet(self._btn_style_accion())
         layout.addWidget(btn_capas)
 
         layout.addWidget(self._hline())
@@ -543,48 +569,374 @@ class VentanaDashboard(QMainWindow):
         fila_umbral.addWidget(btn_mas)
         layout.addLayout(fila_umbral)
 
-        btn_bin_man = QPushButton("⬛  Binarizar (Manual)")
-        btn_bin_man.setCursor(Qt.PointingHandCursor)
-        btn_bin_man.clicked.connect(self.binarizar_manual)
-        layout.addWidget(btn_bin_man)
-
         btn_bin_otsu = QPushButton("⚙  Binarización Automática (Otsu)")
         btn_bin_otsu.setCursor(Qt.PointingHandCursor)
         btn_bin_otsu.clicked.connect(self.binarizar_otsu)
+        btn_bin_otsu.setStyleSheet(self._btn_style_accion())
         layout.addWidget(btn_bin_otsu)
 
         self.lbl_otsu_resultado = QLabel("")
         self.lbl_otsu_resultado.setObjectName("warn")
-        self.lbl_otsu_resultado.setVisible(False)  # oculto hasta que Otsu calcule un umbral
+        self.lbl_otsu_resultado.setVisible(False)
         layout.addWidget(self.lbl_otsu_resultado)
+
+        layout.addStretch()
+        return scroll
+
+    def _make_tab_segmentacion(self):
+        """Pestaña de Segmentación: ruido, operaciones lógicas/relacionales y conteo de objetos."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("border:none; background:transparent;")
+        inner_w = QWidget()
+        inner_w.setStyleSheet(f"background: {C['surface']};")
+        layout = QVBoxLayout(inner_w)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        scroll.setWidget(inner_w)
+
+        # Fix: al cambiar de tab el QScrollArea no siempre recalcula el ancho del
+        # widget interno. Conectar resizeEvent garantiza que inner_w nunca exceda
+        # el ancho del viewport, eliminando el desbordamiento horizontal.
+        def _constrain_width(event, _scroll=scroll, _inner=inner_w):
+            _inner.setMaximumWidth(_scroll.viewport().width())
+            QScrollArea.resizeEvent(_scroll, event)
+        scroll.resizeEvent = _constrain_width
+
+        btn_style_menos_mas = f"""
+            QPushButton {{ background: {C['accent_dim']}; color: {C['accent']}; border: 1px solid {C['accent']}; border-radius: 4px; font-size: 14pt; font-weight: bold; padding: 0px; }}
+            QPushButton:hover {{ background: {C['accent']}; color: #ffffff; }}
+        """
+        btn_style_accion = self._btn_style_accion()
+
+        # ══════════════════════════════════════════
+        # 01 · RUIDO
+        # ══════════════════════════════════════════
+        layout.addWidget(self._section_label("01  ·  RUIDO"))
+
+        # ── Sal ──────────────────────────────────
+        layout.addWidget(self._make_sublabel("Sal  (píxeles blancos)"))
+        fila_sal = QHBoxLayout()
+        lbl_sal_0 = QLabel("1%");   lbl_sal_0.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+        lbl_sal_20 = QLabel("20%"); lbl_sal_20.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+        self.slider_sal = QSlider(Qt.Horizontal)
+        self.slider_sal.setRange(1, 20)
+        self.slider_sal.setValue(2)
+        self.slider_sal.valueChanged.connect(
+            lambda v: self.lbl_sal_valor.setText(f"Cantidad: {v}%"))
+        fila_sal.addWidget(lbl_sal_0); fila_sal.addWidget(self.slider_sal); fila_sal.addWidget(lbl_sal_20)
+        layout.addLayout(fila_sal)
+
+        btn_sal_menos = QPushButton(" − "); btn_sal_menos.setFixedWidth(36)
+        btn_sal_menos.setCursor(Qt.PointingHandCursor); btn_sal_menos.setStyleSheet(btn_style_menos_mas)
+        btn_sal_menos.clicked.connect(lambda: self.slider_sal.setValue(max(1, self.slider_sal.value() - 1)))
+        btn_sal_mas = QPushButton(" + "); btn_sal_mas.setFixedWidth(36)
+        btn_sal_mas.setCursor(Qt.PointingHandCursor); btn_sal_mas.setStyleSheet(btn_style_menos_mas)
+        btn_sal_mas.clicked.connect(lambda: self.slider_sal.setValue(min(20, self.slider_sal.value() + 1)))
+        self.lbl_sal_valor = QLabel("Cantidad: 2%")
+        self.lbl_sal_valor.setAlignment(Qt.AlignCenter)
+        self.lbl_sal_valor.setStyleSheet(f"color:{C['accent']}; font-size:12pt; font-weight:bold;")
+        fila_sal_ctrl = QHBoxLayout()
+        fila_sal_ctrl.addWidget(btn_sal_menos); fila_sal_ctrl.addWidget(self.lbl_sal_valor, 1); fila_sal_ctrl.addWidget(btn_sal_mas)
+        layout.addLayout(fila_sal_ctrl)
+
+        btn_aplicar_sal = QPushButton("⬜  Aplicar Ruido Sal")
+        btn_aplicar_sal.setCursor(Qt.PointingHandCursor)
+        btn_aplicar_sal.setStyleSheet(btn_style_accion)
+        btn_aplicar_sal.clicked.connect(self._seg_aplicar_ruido_sal)
+        layout.addWidget(btn_aplicar_sal)
 
         layout.addWidget(self._hline())
 
-        # ── 5. Guardar imagen ────────────────────
-        layout.addWidget(self._section_label("05  ·  GUARDAR IMAGEN"))
+        # ── Pimienta ──────────────────────────────
+        layout.addWidget(self._make_sublabel("Pimienta  (píxeles negros)"))
+        fila_pim = QHBoxLayout()
+        lbl_pim_0 = QLabel("1%");   lbl_pim_0.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+        lbl_pim_20 = QLabel("20%"); lbl_pim_20.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+        self.slider_pimienta = QSlider(Qt.Horizontal)
+        self.slider_pimienta.setRange(1, 20)
+        self.slider_pimienta.setValue(2)
+        self.slider_pimienta.valueChanged.connect(
+            lambda v: self.lbl_pimienta_valor.setText(f"Cantidad: {v}%"))
+        fila_pim.addWidget(lbl_pim_0); fila_pim.addWidget(self.slider_pimienta); fila_pim.addWidget(lbl_pim_20)
+        layout.addLayout(fila_pim)
 
-        self.chk_histograma = QCheckBox("  Incluir histograma")
-        self.chk_histograma.setStyleSheet(f"""
-            QCheckBox {{ color: {C['text']}; font-size: 12pt; spacing: 8px; }}
-            QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {C['border2']};
-                border-radius: 3px; background: {C['surface3']}; }}
-            QCheckBox::indicator:checked {{ background: {C['accent']}; border-color: {C['accent']}; }}
-        """)
-        self.chk_canales = QCheckBox("  Incluir canales")
-        self.chk_canales.setStyleSheet(self.chk_histograma.styleSheet())
+        btn_pim_menos = QPushButton(" − "); btn_pim_menos.setFixedWidth(36)
+        btn_pim_menos.setCursor(Qt.PointingHandCursor); btn_pim_menos.setStyleSheet(btn_style_menos_mas)
+        btn_pim_menos.clicked.connect(lambda: self.slider_pimienta.setValue(max(1, self.slider_pimienta.value() - 1)))
+        btn_pim_mas = QPushButton(" + "); btn_pim_mas.setFixedWidth(36)
+        btn_pim_mas.setCursor(Qt.PointingHandCursor); btn_pim_mas.setStyleSheet(btn_style_menos_mas)
+        btn_pim_mas.clicked.connect(lambda: self.slider_pimienta.setValue(min(20, self.slider_pimienta.value() + 1)))
+        self.lbl_pimienta_valor = QLabel("Cantidad: 2%")
+        self.lbl_pimienta_valor.setAlignment(Qt.AlignCenter)
+        self.lbl_pimienta_valor.setStyleSheet(f"color:{C['accent']}; font-size:12pt; font-weight:bold;")
+        fila_pim_ctrl = QHBoxLayout()
+        fila_pim_ctrl.addWidget(btn_pim_menos); fila_pim_ctrl.addWidget(self.lbl_pimienta_valor, 1); fila_pim_ctrl.addWidget(btn_pim_mas)
+        layout.addLayout(fila_pim_ctrl)
 
-        layout.addWidget(self.chk_histograma)
-        layout.addWidget(self.chk_canales)
+        btn_aplicar_pimienta = QPushButton("⬛  Aplicar Ruido Pimienta")
+        btn_aplicar_pimienta.setCursor(Qt.PointingHandCursor)
+        btn_aplicar_pimienta.setStyleSheet(btn_style_accion)
+        btn_aplicar_pimienta.clicked.connect(self._seg_aplicar_ruido_pimienta)
+        layout.addWidget(btn_aplicar_pimienta)
 
-        btn_guardar = QPushButton("💾  Guardar Imagen...")
-        btn_guardar.setObjectName("secondary")
-        btn_guardar.setCursor(Qt.PointingHandCursor)
-        btn_guardar.clicked.connect(self.guardar_imagen_actual)
-        layout.addWidget(btn_guardar)
+        layout.addWidget(self._hline())
+
+        # ── Gaussiano ─────────────────────────────
+        layout.addWidget(self._make_sublabel("Gaussiano  (variaciones de intensidad)"))
+        fila_gau = QHBoxLayout()
+        lbl_gau_0 = QLabel("1");   lbl_gau_0.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+        lbl_gau_100 = QLabel("100"); lbl_gau_100.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+        self.slider_sigma = QSlider(Qt.Horizontal)
+        self.slider_sigma.setRange(1, 100)
+        self.slider_sigma.setValue(20)
+        self.slider_sigma.valueChanged.connect(
+            lambda v: self.lbl_sigma_valor.setText(f"Sigma: {v}"))
+        fila_gau.addWidget(lbl_gau_0); fila_gau.addWidget(self.slider_sigma); fila_gau.addWidget(lbl_gau_100)
+        layout.addLayout(fila_gau)
+
+        btn_gau_menos = QPushButton(" − "); btn_gau_menos.setFixedWidth(36)
+        btn_gau_menos.setCursor(Qt.PointingHandCursor); btn_gau_menos.setStyleSheet(btn_style_menos_mas)
+        btn_gau_menos.clicked.connect(lambda: self.slider_sigma.setValue(max(1, self.slider_sigma.value() - 1)))
+        btn_gau_mas = QPushButton(" + "); btn_gau_mas.setFixedWidth(36)
+        btn_gau_mas.setCursor(Qt.PointingHandCursor); btn_gau_mas.setStyleSheet(btn_style_menos_mas)
+        btn_gau_mas.clicked.connect(lambda: self.slider_sigma.setValue(min(100, self.slider_sigma.value() + 1)))
+        self.lbl_sigma_valor = QLabel("Sigma: 20")
+        self.lbl_sigma_valor.setAlignment(Qt.AlignCenter)
+        self.lbl_sigma_valor.setStyleSheet(f"color:{C['accent']}; font-size:12pt; font-weight:bold;")
+        fila_gau_ctrl = QHBoxLayout()
+        fila_gau_ctrl.addWidget(btn_gau_menos); fila_gau_ctrl.addWidget(self.lbl_sigma_valor, 1); fila_gau_ctrl.addWidget(btn_gau_mas)
+        layout.addLayout(fila_gau_ctrl)
+
+        btn_aplicar_gaussiano = QPushButton("〜  Aplicar Ruido Gaussiano")
+        btn_aplicar_gaussiano.setCursor(Qt.PointingHandCursor)
+        btn_aplicar_gaussiano.setStyleSheet(btn_style_accion)
+        btn_aplicar_gaussiano.clicked.connect(self._seg_aplicar_ruido_gaussiano)
+        layout.addWidget(btn_aplicar_gaussiano)
+
+        layout.addWidget(self._hline())
+
+        # ══════════════════════════════════════════
+        # 02 · OPERACIONES
+        # ══════════════════════════════════════════
+        layout.addWidget(self._section_label("02  ·  OPERACIONES"))
+
+        # ── Imagen B ─────────────────────────────
+        layout.addWidget(self._make_sublabel("Imagen secundaria (B)"))
+        self.lbl_imagen_b = QLabel("Sin imagen B cargada")
+        self.lbl_imagen_b.setObjectName("info")
+        self.lbl_imagen_b.setWordWrap(True)
+        layout.addWidget(self.lbl_imagen_b)
+        btn_cargar_b = QPushButton("⊕  Cargar imagen B...")
+        btn_cargar_b.setCursor(Qt.PointingHandCursor)
+        btn_cargar_b.setStyleSheet(btn_style_accion)
+        btn_cargar_b.clicked.connect(self._seg_cargar_imagen_b)
+        layout.addWidget(btn_cargar_b)
+
+        layout.addWidget(self._hline())
+
+        # ── Lógicas ───────────────────────────────
+        layout.addWidget(self._make_sublabel("Lógicas  (operan sobre imagen binaria)"))
+
+        fila_log1 = QHBoxLayout()
+        fila_log1.setSpacing(6)
+        for texto, slot in [("AND", self._seg_and), ("OR", self._seg_or), ("XOR", self._seg_xor)]:
+            b = QPushButton(texto)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(btn_style_accion)
+            b.clicked.connect(slot)
+            fila_log1.addWidget(b)
+        layout.addLayout(fila_log1)
+
+        btn_not = QPushButton("NOT  (invertir imagen A)")
+        btn_not.setCursor(Qt.PointingHandCursor)
+        btn_not.setStyleSheet(btn_style_accion)
+        btn_not.clicked.connect(self._seg_not)
+        layout.addWidget(btn_not)
+
+        layout.addWidget(self._hline())
+
+        # ── Relacionales ──────────────────────────
+        layout.addWidget(self._make_sublabel("Relacionales  (comparar intensidad contra umbral)"))
+
+        fila_rel_s = QHBoxLayout()
+        lbl_rel_0   = QLabel("0");   lbl_rel_0.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+        lbl_rel_255 = QLabel("255"); lbl_rel_255.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+        self.slider_umbral_rel = QSlider(Qt.Horizontal)
+        self.slider_umbral_rel.setRange(0, 255)
+        self.slider_umbral_rel.setValue(128)
+        self.slider_umbral_rel.valueChanged.connect(
+            lambda v: self.lbl_umbral_rel_valor.setText(f"Umbral: {v}"))
+        fila_rel_s.addWidget(lbl_rel_0)
+        fila_rel_s.addWidget(self.slider_umbral_rel)
+        fila_rel_s.addWidget(lbl_rel_255)
+        layout.addLayout(fila_rel_s)
+
+        btn_rel_menos = QPushButton(" − "); btn_rel_menos.setFixedWidth(36)
+        btn_rel_menos.setCursor(Qt.PointingHandCursor); btn_rel_menos.setStyleSheet(btn_style_menos_mas)
+        btn_rel_menos.clicked.connect(
+            lambda: self.slider_umbral_rel.setValue(max(0, self.slider_umbral_rel.value() - 1)))
+        btn_rel_mas = QPushButton(" + "); btn_rel_mas.setFixedWidth(36)
+        btn_rel_mas.setCursor(Qt.PointingHandCursor); btn_rel_mas.setStyleSheet(btn_style_menos_mas)
+        btn_rel_mas.clicked.connect(
+            lambda: self.slider_umbral_rel.setValue(min(255, self.slider_umbral_rel.value() + 1)))
+        self.lbl_umbral_rel_valor = QLabel("Umbral: 128")
+        self.lbl_umbral_rel_valor.setAlignment(Qt.AlignCenter)
+        self.lbl_umbral_rel_valor.setStyleSheet(f"color:{C['accent']}; font-size:12pt; font-weight:bold;")
+        fila_rel_ctrl = QHBoxLayout()
+        fila_rel_ctrl.addWidget(btn_rel_menos)
+        fila_rel_ctrl.addWidget(self.lbl_umbral_rel_valor, 1)
+        fila_rel_ctrl.addWidget(btn_rel_mas)
+        layout.addLayout(fila_rel_ctrl)
+
+        fila_rel = QHBoxLayout()
+        fila_rel.setSpacing(6)
+        for texto, slot in [("mayor >", self._seg_relacional_mayor),
+                             ("menor <", self._seg_relacional_menor),
+                             ("igual ==", self._seg_relacional_igual)]:
+            b = QPushButton(texto)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(btn_style_accion)
+            b.clicked.connect(slot)
+            fila_rel.addWidget(b)
+        layout.addLayout(fila_rel)
+
+        layout.addWidget(self._hline())
+
+        # ══════════════════════════════════════════
+        # 03 · CONTEO DE OBJETOS
+        # ══════════════════════════════════════════
+        layout.addWidget(self._section_label("03  ·  CONTEO DE OBJETOS"))
+
+        fila_vec = QHBoxLayout()
+        fila_vec.setSpacing(6)
+        btn_v4 = QPushButton("Vecindad-4")
+        btn_v4.setCursor(Qt.PointingHandCursor)
+        btn_v4.setStyleSheet(btn_style_accion)
+        btn_v4.clicked.connect(self._seg_vecindad_4)
+        btn_v8 = QPushButton("Vecindad-8")
+        btn_v8.setCursor(Qt.PointingHandCursor)
+        btn_v8.setStyleSheet(btn_style_accion)
+        btn_v8.clicked.connect(self._seg_vecindad_8)
+        fila_vec.addWidget(btn_v4); fila_vec.addWidget(btn_v8)
+        layout.addLayout(fila_vec)
+
+        btn_comparar = QPushButton("◫  Comparar Vecindad-4 vs Vecindad-8")
+        btn_comparar.setCursor(Qt.PointingHandCursor)
+        btn_comparar.setStyleSheet(btn_style_accion)
+        btn_comparar.clicked.connect(self._seg_comparar_vecindad)
+        layout.addWidget(btn_comparar)
+
+        self.lbl_conteo_resultado = QLabel("")
+        self.lbl_conteo_resultado.setObjectName("warn")
+        self.lbl_conteo_resultado.setAlignment(Qt.AlignCenter)
+        self.lbl_conteo_resultado.setVisible(False)
+        layout.addWidget(self.lbl_conteo_resultado)
 
         layout.addStretch()
+        return scroll
 
-        return w
+    def _make_sublabel(self, text):
+        """Label secundario para subtítulos dentro de una sección."""
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"color:{C['text2']}; font-size:11pt;")
+        return lbl
+
+    def _btn_style_accion(self):
+        """Estilo homologado para botones de acción en ambas pestañas del sidebar."""
+        return f"""
+            QPushButton {{
+                background: {C['surface3']};
+                color: {C['text']};
+                border: 1px solid {C['border2']};
+                border-radius: 4px;
+                padding: 10px 12px;
+                min-height: 38px;
+                text-align: center;
+                font-size: 12pt;
+            }}
+            QPushButton:hover {{
+                background: {C['accent_dim']};
+                border-color: {C['accent']};
+                color: {C['accent']};
+            }}
+            QPushButton:pressed {{ background: {C['accent']}; color: {C['bg']}; }}
+        """
+
+
+
+    def _make_footer_guardar(self):
+        """Footer fijo debajo de las tabs: siempre visible, independiente de la pestaña activa."""
+        footer = QWidget()
+        footer.setStyleSheet(f"""
+            background: {C['surface2']};
+            border-top: 1px solid {C['border2']};
+        """)
+        layout = QVBoxLayout(footer)
+        layout.setContentsMargins(12, 8, 12, 10)
+        layout.setSpacing(6)
+
+        # ── Restablecer ─────────────────────────
+        btn_restablecer = QPushButton("↺  Restablecer imagen")
+        btn_restablecer.setCursor(Qt.PointingHandCursor)
+        btn_restablecer.clicked.connect(self.restablecer_imagen)
+        btn_restablecer.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid {C['danger']};
+                color: {C['danger']};
+                border-radius: 4px;
+                padding: 8px;
+                text-align: center;
+                font-size: 12pt;
+            }}
+            QPushButton:hover {{ background: {C['danger']}; color: white; }}
+        """)
+        layout.addWidget(btn_restablecer)
+
+        # ── Separador ────────────────────────────
+        sep = QFrame()
+        sep.setObjectName("hline")
+        layout.addWidget(sep)
+
+        # ── Checkboxes + Guardar ─────────────────
+        chk_style = f"""
+            QCheckBox {{ color: {C['text2']}; font-size: 11pt; spacing: 6px; }}
+            QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid {C['border2']};
+                border-radius: 3px; background: {C['surface3']}; }}
+            QCheckBox::indicator:checked {{ background: {C['accent']}; border-color: {C['accent']}; }}
+        """
+        fila_chk = QHBoxLayout()
+        fila_chk.setSpacing(16)
+        self.chk_histograma = QCheckBox("Histograma")
+        self.chk_histograma.setStyleSheet(chk_style)
+        self.chk_canales = QCheckBox("Canales")
+        self.chk_canales.setStyleSheet(chk_style)
+        fila_chk.addWidget(self.chk_histograma)
+        fila_chk.addWidget(self.chk_canales)
+        fila_chk.addStretch()
+        layout.addLayout(fila_chk)
+
+        btn_guardar = QPushButton("💾  Guardar Imagen...")
+        btn_guardar.setCursor(Qt.PointingHandCursor)
+        btn_guardar.clicked.connect(self.guardar_imagen_actual)
+        btn_guardar.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid {C['accent2']};
+                color: {C['accent2']};
+                border-radius: 4px;
+                padding: 8px;
+                text-align: center;
+                font-size: 12pt;
+            }}
+            QPushButton:hover {{ background: {C['accent2']}; color: white; }}
+        """)
+        layout.addWidget(btn_guardar)
+
+        return footer
+
 
     # ── Panel Central (visor) ─────────────────────
     def _make_center(self):
@@ -725,9 +1077,16 @@ class VentanaDashboard(QMainWindow):
         btn_ver = QPushButton("📈  Ver Gráfica")
         btn_ver.setCursor(Qt.PointingHandCursor)
         btn_ver.setStyleSheet(f"""
-            QPushButton {{ text-align: center; }}
-            QPushButton:hover {{ background: {C['accent_dim']}; border-color: {C['accent']}; color: {C['accent']}; }}
-            QPushButton:pressed {{ background: {C['accent']}; color: {C['bg']}; }}
+            QPushButton {{
+                background: transparent;
+                border: 1px solid {C['accent']};
+                color: {C['accent']};
+                border-radius: 4px;
+                padding: 8px;
+                text-align: center;
+                font-size: 12pt;
+            }}
+            QPushButton:hover {{ background: {C['accent']}; color: white; }}
         """)
         btn_ver.clicked.connect(self.mostrar_grafica_histograma)
         layout.addWidget(btn_ver)
@@ -889,11 +1248,27 @@ class VentanaDashboard(QMainWindow):
 
     def binarizar_otsu(self):
         if not self._check(): return
+
+        # Restaurar datos originales antes de binarizar, igual que binarizar_manual.
+        # Sin esto, si la imagen ya era BINARIO el controlador la rechaza.
+        if hasattr(self, '_datos_originales') and self._datos_originales is not None:
+            self.imagen_metadata.datos = self._datos_originales.copy()
+            self.imagen_metadata.modelo = "RGB"
+
         resp = procesadorImagen.conversion_imagen_opencv_otsu(self.imagen_metadata)
         self.imagen_metadata = resp["objeto"]
         if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
         else:
             u = self.imagen_metadata.umbral
+
+            # Sincronizar slider con el umbral calculado.
+            # blockSignals evita que valueChanged dispare binarizar_manual()
+            # encima del resultado de Otsu.
+            self.slider.blockSignals(True)
+            self.slider.setValue(int(u) if u else 128)
+            self.lbl_umbral.setText(f"Umbral: {int(u) if u else 128}")
+            self.slider.blockSignals(False)
+
             self.lbl_otsu_resultado.setText(f"Umbral óptimo encontrado: {int(u) if u else '—'}")
             self.lbl_otsu_resultado.setVisible(True)
             self._mostrar_imagen()
@@ -1029,13 +1404,246 @@ class VentanaDashboard(QMainWindow):
     #  HELPERS
     # ══════════════════════════════════════════════════════════════
 
+    # ══════════════════════════════════════════════════════════════
+    #  ACCIONES — SEGMENTACIÓN
+    # ══════════════════════════════════════════════════════════════
+
+    def _seg_cargar_imagen_b(self):
+        """Carga la imagen secundaria B desde disco y la persiste en self.imagen_metadata_b."""
+        ruta = QFileDialog.getOpenFileName(
+            self, "Seleccionar imagen secundaria (B)",
+            self._leer_ultimo_directorio(),
+            "Imágenes (*.png *.jpg *.jpeg *.bmp *.tiff)"
+        )[0]
+        if not ruta:
+            return
+        self._guardar_ultimo_directorio(ruta)
+        self.imagen_metadata_b = metadataImagen(ruta)
+        resp = procesadorImagen.cargar_imagen_opencv_rgb(self.imagen_metadata_b)
+        self.imagen_metadata_b = resp["objeto"]
+        if resp["error"]:
+            self._status(f"⚠  Error al cargar imagen B: {resp['mensaje']}", C["warn"])
+            self.imagen_metadata_b = None
+            self.lbl_imagen_b.setText("Sin imagen B cargada")
+        else:
+            self.lbl_imagen_b.setText(self.imagen_metadata_b.nombre)
+            self._status(f"✔  Imagen B cargada: {self.imagen_metadata_b.nombre}")
+
+    def _seg_check_imagen_b(self):
+        """Verifica que imagen B esté cargada. Retorna False y muestra aviso si no."""
+        if self.imagen_metadata_b is None or self.imagen_metadata_b.datos is None:
+            QMessageBox.warning(self, "Sin imagen B",
+                "Carga una imagen secundaria (B) antes de aplicar esta operación.")
+            return False
+        return True
+
+    # ── Ruido ─────────────────────────────────────────────────────
+
+    def _seg_aplicar_ruido_sal(self):
+        if not self._check(): return
+        cantidad = self.slider_sal.value() / 100.0
+        resp = procesadorImagen.agregar_ruido_sal(self.imagen_metadata, cantidad)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]:
+            self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _seg_aplicar_ruido_pimienta(self):
+        if not self._check(): return
+        cantidad = self.slider_pimienta.value() / 100.0
+        resp = procesadorImagen.agregar_ruido_pimienta(self.imagen_metadata, cantidad)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]:
+            self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _seg_aplicar_ruido_gaussiano(self):
+        if not self._check(): return
+        sigma = self.slider_sigma.value()
+        resp = procesadorImagen.agregar_ruido_gaussiano(self.imagen_metadata, media=0, sigma=sigma)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]:
+            self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    # ── Operaciones lógicas ───────────────────────────────────────
+
+    def _seg_and(self):
+        if not self._check() or not self._seg_check_imagen_b(): return
+        resp = procesadorImagen.and_imagenes(self.imagen_metadata, self.imagen_metadata_b)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _seg_or(self):
+        if not self._check() or not self._seg_check_imagen_b(): return
+        resp = procesadorImagen.or_imagenes(self.imagen_metadata, self.imagen_metadata_b)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _seg_xor(self):
+        if not self._check() or not self._seg_check_imagen_b(): return
+        resp = procesadorImagen.xor_imagenes(self.imagen_metadata, self.imagen_metadata_b)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _seg_not(self):
+        if not self._check(): return
+        resp = procesadorImagen.not_imagen(self.imagen_metadata)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    # ── Operaciones relacionales ──────────────────────────────────
+
+    def _seg_relacional_mayor(self):
+        if not self._check(): return
+        umbral = self.slider_umbral_rel.value()
+        resp = procesadorImagen.relacional_mayor(self.imagen_metadata, umbral)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _seg_relacional_menor(self):
+        if not self._check(): return
+        umbral = self.slider_umbral_rel.value()
+        resp = procesadorImagen.relacional_menor(self.imagen_metadata, umbral)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _seg_relacional_igual(self):
+        if not self._check(): return
+        umbral = self.slider_umbral_rel.value()
+        resp = procesadorImagen.relacional_igual(self.imagen_metadata, umbral)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    # ── Conteo de objetos ─────────────────────────────────────────
+
+    def _seg_mostrar_conteo(self, resp4=None, resp8=None):
+        """Actualiza el label de resultado de conteo y abre la figura matplotlib."""
+        import matplotlib.pyplot as plt
+        import cv2 as _cv2
+
+        if resp4 and not resp4["error"] and resp8 is None:
+            # Solo vecindad-4
+            n = resp4["num_objetos"]
+            self.lbl_conteo_resultado.setText(f"Vecindad-4:  {n} objeto(s) detectado(s)")
+            self.lbl_conteo_resultado.setVisible(True)
+
+            fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+            axs[0].imshow(resp4["labels"], cmap="jet")
+            axs[0].set_title(f"Vecindad-4 — etiquetas ({n} obj.)")
+            axs[0].axis("off")
+            axs[1].imshow(_cv2.cvtColor(resp4["imagen_contornos"], _cv2.COLOR_BGR2RGB))
+            axs[1].set_title("Contornos numerados")
+            axs[1].axis("off")
+            plt.tight_layout(); plt.show()
+
+        elif resp8 and not resp8["error"] and resp4 is None:
+            # Solo vecindad-8
+            n = resp8["num_objetos"]
+            self.lbl_conteo_resultado.setText(f"Vecindad-8:  {n} objeto(s) detectado(s)")
+            self.lbl_conteo_resultado.setVisible(True)
+
+            fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+            axs[0].imshow(resp8["labels"], cmap="jet")
+            axs[0].set_title(f"Vecindad-8 — etiquetas ({n} obj.)")
+            axs[0].axis("off")
+            axs[1].imshow(_cv2.cvtColor(resp8["imagen_contornos"], _cv2.COLOR_BGR2RGB))
+            axs[1].set_title("Contornos numerados")
+            axs[1].axis("off")
+            plt.tight_layout(); plt.show()
+
+        elif resp4 and resp8:
+            # Comparación
+            n4, n8 = resp4["num_objetos"], resp8["num_objetos"]
+            self.lbl_conteo_resultado.setText(
+                f"Vecindad-4: {n4} obj.   |   Vecindad-8: {n8} obj.   |   Δ {abs(n4-n8)}")
+            self.lbl_conteo_resultado.setVisible(True)
+
+            fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+            fig.suptitle(f"Comparación de vecindad  ·  [{self.imagen_metadata.nombre}]", fontsize=12)
+            axs[0,0].imshow(resp4["labels"], cmap="jet")
+            axs[0,0].set_title(f"V-4 etiquetas ({n4} obj.)"); axs[0,0].axis("off")
+            axs[0,1].imshow(_cv2.cvtColor(resp4["imagen_contornos"], _cv2.COLOR_BGR2RGB))
+            axs[0,1].set_title("V-4 contornos"); axs[0,1].axis("off")
+            axs[1,0].imshow(resp8["labels"], cmap="jet")
+            axs[1,0].set_title(f"V-8 etiquetas ({n8} obj.)"); axs[1,0].axis("off")
+            axs[1,1].imshow(_cv2.cvtColor(resp8["imagen_contornos"], _cv2.COLOR_BGR2RGB))
+            axs[1,1].set_title("V-8 contornos"); axs[1,1].axis("off")
+            plt.tight_layout(); plt.show()
+
+    def _seg_vecindad_4(self):
+        if not self._check(): return
+        resp = procesadorImagen.analizar_vecindad_4(self.imagen_metadata)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]:
+            self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(); self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+            self._seg_mostrar_conteo(resp4=resp)
+
+    def _seg_vecindad_8(self):
+        if not self._check(): return
+        resp = procesadorImagen.analizar_vecindad_8(self.imagen_metadata)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]:
+            self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(); self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+            self._seg_mostrar_conteo(resp8=resp)
+
+    def _seg_comparar_vecindad(self):
+        if not self._check(): return
+        resp4 = procesadorImagen.analizar_vecindad_4(self.imagen_metadata)
+        resp8 = procesadorImagen.analizar_vecindad_8(self.imagen_metadata)
+        # Persistir el estado de vecindad-8 (más informativa) como imagen actual
+        self.imagen_metadata = resp8["objeto"]
+        if resp4["error"]:
+            self._status(f"⚠  V-4: {resp4['mensaje']}", C["warn"]); return
+        if resp8["error"]:
+            self._status(f"⚠  V-8: {resp8['mensaje']}", C["warn"]); return
+        self._mostrar_imagen(); self.calcular_histograma()
+        self._status(f"✔  Comparación completada — V4:{resp4['num_objetos']} obj. / V8:{resp8['num_objetos']} obj.")
+        self._seg_mostrar_conteo(resp4=resp4, resp8=resp8)
+
     def _check(self):
         if not self.imagen_metadata or self.imagen_metadata.datos is None:
             QMessageBox.warning(self, "Sin imagen", "Primero carga una imagen.")
             return False
         return True
 
-    def _mostrar_imagen(self, registrar=True):
+    def _mostrar_imagen(self, registrar=True, es_derivable=True):
         datos = self.imagen_metadata.datos
         if datos is None: return
         if len(datos.shape) == 2:
@@ -1059,15 +1667,18 @@ class VentanaDashboard(QMainWindow):
 
         # Solo agregar al carrusel si es una acción nueva (no una restauración)
         if registrar:
-            self._agregar_carrusel(pixmap, self.imagen_metadata.modelo)
+            self._agregar_carrusel(pixmap, self.imagen_metadata.modelo, es_derivable)
 
-    def _agregar_carrusel(self, pixmap, etiqueta):
+    def _agregar_carrusel(self, pixmap, etiqueta, es_derivable=True):
         # Crear y guardar el estado en el historial
         entrada = metadataHistorialImagen(self.imagen_metadata.ruta)
-        entrada.modelo    = self.imagen_metadata.modelo
-        entrada.umbral    = self.imagen_metadata.umbral
-        entrada.histograma = self.imagen_metadata.histograma.copy()
-        entrada.thumbnail = pixmap
+        entrada.modelo       = self.imagen_metadata.modelo
+        entrada.umbral       = self.imagen_metadata.umbral
+        entrada.histograma   = self.imagen_metadata.histograma.copy()
+        entrada.thumbnail    = pixmap
+        entrada.es_derivable = es_derivable
+        if not es_derivable:
+            entrada.datos = self.imagen_metadata.datos.copy()
         self.historial_estados.append(entrada)
         index = len(self.historial_estados) - 1
 
@@ -1109,6 +1720,17 @@ class VentanaDashboard(QMainWindow):
 
         entrada = self.historial_estados[index]
 
+        # ── Rama rápida: estado no derivable ─────────────────────────────
+        if not entrada.es_derivable and entrada.datos is not None:
+            self.imagen_metadata.datos  = entrada.datos.copy()
+            self.imagen_metadata.modelo = entrada.modelo
+            self.imagen_metadata.umbral = entrada.umbral
+            self._mostrar_imagen(registrar=False)
+            self.calcular_histograma()
+            self._status(f"↩  Estado restaurado: {entrada.nombre}  ·  {entrada.modelo}")
+            return
+
+        # ── Rama estándar: reconstruir desde disco ───────────────────────
         # Si la entrada pertenece a una imagen diferente, recargar desde su ruta
         # y actualizar _datos_originales para que el slider de binarización funcione correctamente
         if entrada.ruta != self.imagen_metadata.ruta:
