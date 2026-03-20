@@ -340,8 +340,14 @@ class VentanaDashboard(QMainWindow):
         super().__init__()
         self.imagen_metadata   = None
         self.imagen_metadata_b = None  # Imagen secundaria persistente para operaciones entre dos imágenes
-        self._datos_originales        = None  # Copia del archivo original — nunca cambia tras la carga
-        self._datos_binarizacion_base = None  # Base para binarizar: original o último resultado de segmentación
+        self._datos_originales = None
+        # Base de binarización: guarda datos+modelo ANTES de binarizar.
+        # Se actualiza dentro de binarizar_manual/otsu cuando la imagen NO es binaria.
+        # Se limpia (None) cuando operaciones lógicas producen un resultado binario,
+        # para preservar ese resultado ante movimientos del slider.
+        self._base_bin_datos  = None
+        self._base_bin_modelo = None
+        self._fig_conteo      = None  # Figura matplotlib de comparación vecindad-4 vs 8
         self.historial_estados = []  # Lista de metadataHistorialImagen
         self._inicializar_cache()
         self._build_ui()
@@ -496,7 +502,8 @@ class VentanaDashboard(QMainWindow):
 
         self.lbl_info_archivo = QLabel("Sin imagen seleccionada")
         self.lbl_info_archivo.setObjectName("info")
-        self.lbl_info_archivo.setWordWrap(True)
+        self.lbl_info_archivo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.lbl_info_archivo.setMaximumWidth(340)
         layout.addWidget(self.lbl_info_archivo)
 
         layout.addWidget(self._hline())
@@ -716,6 +723,23 @@ class VentanaDashboard(QMainWindow):
         btn_aplicar_gaussiano.clicked.connect(self._seg_aplicar_ruido_gaussiano)
         layout.addWidget(btn_aplicar_gaussiano)
 
+        btn_retirar_ruido = QPushButton("✕  Retirar Ruido")
+        btn_retirar_ruido.setCursor(Qt.PointingHandCursor)
+        btn_retirar_ruido.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid {C['danger']};
+                color: {C['danger']};
+                border-radius: 4px;
+                padding: 8px;
+                text-align: center;
+                font-size: 12pt;
+            }}
+            QPushButton:hover {{ background: {C['danger']}; color: white; }}
+        """)
+        btn_retirar_ruido.clicked.connect(self._seg_retirar_ruido)
+        layout.addWidget(btn_retirar_ruido)
+
         layout.addWidget(self._hline())
 
         # ══════════════════════════════════════════
@@ -725,9 +749,23 @@ class VentanaDashboard(QMainWindow):
 
         # ── Imagen B ─────────────────────────────
         layout.addWidget(self._make_sublabel("Imagen secundaria (B)"))
+
+        self.thumb_imagen_b = QLabel()
+        self.thumb_imagen_b.setFixedSize(70, 56)
+        self.thumb_imagen_b.setAlignment(Qt.AlignCenter)
+        self.thumb_imagen_b.setStyleSheet(f"""
+            border: 1px solid {C['border2']};
+            border-radius: 3px;
+            background: {C['surface2']};
+            padding: 2px;
+        """)
+        self.thumb_imagen_b.setVisible(False)
+        layout.addWidget(self.thumb_imagen_b)
+
         self.lbl_imagen_b = QLabel("Sin imagen B cargada")
         self.lbl_imagen_b.setObjectName("info")
-        self.lbl_imagen_b.setWordWrap(True)
+        self.lbl_imagen_b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.lbl_imagen_b.setMaximumWidth(340)
         layout.addWidget(self.lbl_imagen_b)
         btn_cargar_b = QPushButton("⊕  Cargar imagen B...")
         btn_cargar_b.setCursor(Qt.PointingHandCursor)
@@ -829,11 +867,17 @@ class VentanaDashboard(QMainWindow):
         btn_comparar.clicked.connect(self._seg_comparar_vecindad)
         layout.addWidget(btn_comparar)
 
-        self.lbl_conteo_resultado = QLabel("")
-        self.lbl_conteo_resultado.setObjectName("warn")
-        self.lbl_conteo_resultado.setAlignment(Qt.AlignCenter)
-        self.lbl_conteo_resultado.setVisible(False)
-        layout.addWidget(self.lbl_conteo_resultado)
+        self.lbl_conteo_v4 = QLabel("")
+        self.lbl_conteo_v4.setObjectName("warn")
+        self.lbl_conteo_v4.setAlignment(Qt.AlignCenter)
+        self.lbl_conteo_v4.setVisible(False)
+        layout.addWidget(self.lbl_conteo_v4)
+
+        self.lbl_conteo_v8 = QLabel("")
+        self.lbl_conteo_v8.setObjectName("warn")
+        self.lbl_conteo_v8.setAlignment(Qt.AlignCenter)
+        self.lbl_conteo_v8.setVisible(False)
+        layout.addWidget(self.lbl_conteo_v8)
 
         layout.addStretch()
         return scroll
@@ -914,8 +958,11 @@ class VentanaDashboard(QMainWindow):
         self.chk_histograma.setStyleSheet(chk_style)
         self.chk_canales = QCheckBox("Canales")
         self.chk_canales.setStyleSheet(chk_style)
+        self.chk_conteo = QCheckBox("Conteo obj.")
+        self.chk_conteo.setStyleSheet(chk_style)
         fila_chk.addWidget(self.chk_histograma)
         fila_chk.addWidget(self.chk_canales)
+        fila_chk.addWidget(self.chk_conteo)
         fila_chk.addStretch()
         layout.addLayout(fila_chk)
 
@@ -1202,10 +1249,11 @@ class VentanaDashboard(QMainWindow):
             self._status(f"⚠  {resp['mensaje']}", C["warn"])
             return
         # Guardar copia de los datos RGB originales para el slider de binarización
-        self._datos_originales        = self.imagen_metadata.datos.copy()
-        self._datos_binarizacion_base = self.imagen_metadata.datos.copy()
+        self._datos_originales = self.imagen_metadata.datos.copy()
+        self._base_bin_datos   = self.imagen_metadata.datos.copy()
+        self._base_bin_modelo  = self.imagen_metadata.modelo
         nombre = self.imagen_metadata.nombre
-        self.lbl_info_archivo.setText(nombre)
+        self.lbl_info_archivo.setText(nombre[:42] + "…" if len(nombre) > 42 else nombre)
         self.chip_archivo.setText(nombre[:20] + "…" if len(nombre) > 20 else nombre)
         self._mostrar_imagen()
         self._status(f"✔  {nombre}  cargado correctamente  ·  RGB")
@@ -1229,54 +1277,83 @@ class VentanaDashboard(QMainWindow):
             if resp["error"]:
                 self._status(f"⚠  {resp['mensaje']}", C["warn"])
             else:
+                # Conversión de modelo exitosa: actualizar base de binarización
+                self._base_bin_datos  = self.imagen_metadata.datos.copy()
+                self._base_bin_modelo = self.imagen_metadata.modelo
                 self._mostrar_imagen()
                 self._status(f"✔  Modelo aplicado: {self.imagen_metadata.modelo}")
                 self.calcular_histograma()
 
     def binarizar_manual(self):
         if not self._check(): return
-        try:
-            # Restaurar datos originales antes de binarizar para que el slider pueda moverse libremente
-            if hasattr(self, '_datos_originales') and self._datos_originales is not None:
-                self.imagen_metadata.datos = self._datos_originales.copy()
-                self.imagen_metadata.modelo = "RGB"
-            u = self.slider.value()
-            resp = procesadorImagen.conversion_imagen_opencv_binaria(self.imagen_metadata, u)
-            self.imagen_metadata = resp["objeto"]
-            if resp["error"]:
-                self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        if procesadorImagen.es_binaria(self.imagen_metadata):
+            if self.imagen_metadata.es_resultado_logico:
+                QMessageBox.information(self, "No se puede binarizar",
+                    "La imagen es resultado de una operación lógica (AND / OR / XOR / NOT / Relacional) "
+                    "y ya es binaria por definición — sus píxeles solo tienen valores 0 o 255.\n\n"
+                    "Binarizarla de nuevo no añade información: cualquier umbral entre 0 y 254 "
+                    "produce exactamente la misma imagen, porque los píxeles ya están en sus valores extremos.\n\n"
+                    "Para explorar distintos umbrales sobre la imagen original, usa ↺ Restablecer."
+                )
+                return
+            elif self._base_bin_datos is not None:
+                self.imagen_metadata.datos  = self._base_bin_datos.copy()
+                self.imagen_metadata.modelo = self._base_bin_modelo
             else:
-                self._mostrar_imagen()
-                self._status(f"✔  Binarización aplicada  ·  Umbral: {u}")
-                self.calcular_histograma()
-        except Exception as e:
-            self._status(f"⚠  Error en binarizar_manual: {type(e).__name__}: {e}", C["warn"])
+                return
+        else:
+            self._base_bin_datos  = self.imagen_metadata.datos.copy()
+            self._base_bin_modelo = self.imagen_metadata.modelo
+        u = self.slider.value()
+        resp = procesadorImagen.conversion_imagen_opencv_binaria(self.imagen_metadata, u)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen()
+            self._status(f"✔  Binarización aplicada  ·  Umbral: {u}")
+            self.calcular_histograma()
 
     def binarizar_otsu(self):
         if not self._check(): return
-        try:
-            # Restaurar datos originales antes de binarizar, igual que binarizar_manual.
-            if hasattr(self, '_datos_originales') and self._datos_originales is not None:
-                self.imagen_metadata.datos = self._datos_originales.copy()
-                self.imagen_metadata.modelo = "RGB"
-
-            resp = procesadorImagen.conversion_imagen_opencv_otsu(self.imagen_metadata)
-            self.imagen_metadata = resp["objeto"]
-            if resp["error"]:
-                self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        if procesadorImagen.es_binaria(self.imagen_metadata):
+            if self.imagen_metadata.es_resultado_logico:
+                QMessageBox.information(self, "Otsu no aplicable",
+                    "La imagen es resultado de una operación lógica (AND / OR / XOR / NOT / Relacional) "
+                    "y ya es binaria por definición.\n\n"
+                    "El algoritmo de Otsu necesita un histograma continuo de grises para encontrar el umbral óptimo "
+                    "que separe dos poblaciones. Con solo dos valores posibles (0 y 255) el histograma tiene "
+                    "exactamente dos barras y no hay separación que calcular.\n\n"
+                    "Para aplicar Otsu desde la imagen original, usa ↺ Restablecer."
+                )
+                return
+            elif self._base_bin_datos is not None:
+                self.imagen_metadata.datos  = self._base_bin_datos.copy()
+                self.imagen_metadata.modelo = self._base_bin_modelo
             else:
-                u = self.imagen_metadata.umbral
-                self.slider.blockSignals(True)
-                self.slider.setValue(int(u) if u else 128)
-                self.lbl_umbral.setText(f"Umbral: {int(u) if u else 128}")
-                self.slider.blockSignals(False)
-                self.lbl_otsu_resultado.setText(f"Umbral óptimo encontrado: {int(u) if u else '—'}")
-                self.lbl_otsu_resultado.setVisible(True)
-                self._mostrar_imagen()
-                self._status(f"✔  Otsu  ·  Umbral: {int(u) if u else '—'}")
-                self.calcular_histograma()
-        except Exception as e:
-            self._status(f"⚠  Error en binarizar_otsu: {type(e).__name__}: {e}", C["warn"])
+                return
+        else:
+            self._base_bin_datos  = self.imagen_metadata.datos.copy()
+            self._base_bin_modelo = self.imagen_metadata.modelo
+
+        resp = procesadorImagen.conversion_imagen_opencv_otsu(self.imagen_metadata)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            u = self.imagen_metadata.umbral
+
+            # Sincronizar slider con el umbral calculado.
+            # blockSignals evita que valueChanged dispare binarizar_manual()
+            # encima del resultado de Otsu.
+            self.slider.blockSignals(True)
+            self.slider.setValue(int(u) if u else 128)
+            self.lbl_umbral.setText(f"Umbral: {int(u) if u else 128}")
+            self.slider.blockSignals(False)
+
+            self.lbl_otsu_resultado.setText(f"Umbral óptimo encontrado: {int(u) if u else '—'}")
+            self.lbl_otsu_resultado.setVisible(True)
+            self._mostrar_imagen()
+            self._status(f"✔  Otsu  ·  Umbral: {int(u) if u else '—'}")
+            self.calcular_histograma()
 
     def mostrar_capas(self):
         if not self._check(): return
@@ -1352,8 +1429,9 @@ class VentanaDashboard(QMainWindow):
         self.lbl_otsu_resultado.setText("")
         self.lbl_otsu_resultado.setVisible(False)
         if not resp["error"]:
-            self._datos_originales        = self.imagen_metadata.datos.copy()
-            self._datos_binarizacion_base = self.imagen_metadata.datos.copy()  # reset también la base de binarización
+            self._datos_originales = self.imagen_metadata.datos.copy()
+            self._base_bin_datos   = self.imagen_metadata.datos.copy()
+            self._base_bin_modelo  = self.imagen_metadata.modelo
             self._mostrar_imagen()
             self._status("✔  Imagen restablecida a RGB original")
             self.calcular_histograma()
@@ -1394,6 +1472,14 @@ class VentanaDashboard(QMainWindow):
             else:
                 archivos_guardados.extend(resp_c["archivos"])
 
+        # 4. Guardar figura de conteo de objetos si está marcado
+        if self.chk_conteo.isChecked():
+            resp_co = procesadorImagen.guardar_conteo_vecindad(self.imagen_metadata, carpeta)
+            if resp_co["error"]:
+                errores.append(resp_co["mensaje"])
+            else:
+                archivos_guardados.extend(resp_co["archivos"])
+
         # 4. Reporte de resultado en status bar
         n = len(archivos_guardados)
         carpeta_nombre = os.path.basename(carpeta) or carpeta
@@ -1429,8 +1515,22 @@ class VentanaDashboard(QMainWindow):
             self._status(f"⚠  Error al cargar imagen B: {resp['mensaje']}", C["warn"])
             self.imagen_metadata_b = None
             self.lbl_imagen_b.setText("Sin imagen B cargada")
+            self.thumb_imagen_b.setVisible(False)
         else:
-            self.lbl_imagen_b.setText(self.imagen_metadata_b.nombre)
+            # Generar thumbnail con el mismo tamaño que el carrusel (70×56 / 66×52)
+            datos = self.imagen_metadata_b.datos
+            if len(datos.shape) == 2:
+                h, w = datos.shape
+                qimg = QImage(datos.data, w, h, w, QImage.Format_Grayscale8)
+            else:
+                h, w, ch = datos.shape
+                qimg = QImage(datos.data, w, h, ch * w, QImage.Format_RGB888)
+            pixmap_b = QPixmap.fromImage(qimg).scaled(
+                66, 52, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.thumb_imagen_b.setPixmap(pixmap_b)
+            self.thumb_imagen_b.setVisible(True)
+            _nb = self.imagen_metadata_b.nombre
+            self.lbl_imagen_b.setText(_nb[:42] + "…" if len(_nb) > 42 else _nb)
             self._status(f"✔  Imagen B cargada: {self.imagen_metadata_b.nombre}")
 
     def _seg_check_imagen_b(self):
@@ -1454,6 +1554,8 @@ class VentanaDashboard(QMainWindow):
             self._mostrar_imagen(es_derivable=False)
             self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            self._base_bin_datos = None
+            self._base_bin_modelo = None
 
     def _seg_aplicar_ruido_pimienta(self):
         if not self._check(): return
@@ -1466,6 +1568,8 @@ class VentanaDashboard(QMainWindow):
             self._mostrar_imagen(es_derivable=False)
             self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            self._base_bin_datos = None
+            self._base_bin_modelo = None
 
     def _seg_aplicar_ruido_gaussiano(self):
         if not self._check(): return
@@ -1478,6 +1582,49 @@ class VentanaDashboard(QMainWindow):
             self._mostrar_imagen(es_derivable=False)
             self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            # Gaussiano produce GRIS: actualizar base para que el slider pueda binarizar sobre la imagen con ruido
+            self._base_bin_datos  = self.imagen_metadata.datos.copy()
+            self._base_bin_modelo = self.imagen_metadata.modelo
+
+    def _seg_retirar_ruido(self):
+        """Recarga la imagen desde disco descartando cualquier ruido acumulado en memoria.
+        Mantiene el modelo de color y umbral previos si la imagen era binaria."""
+        if not self._check(): return
+        modelo_previo = self.imagen_metadata.modelo
+        umbral_previo = self.imagen_metadata.umbral
+
+        # Recargar RGB limpio desde disco
+        resp = procesadorImagen.cargar_imagen_opencv_rgb(self.imagen_metadata)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]:
+            self._status(f"⚠  {resp['mensaje']}", C["warn"])
+            return
+
+        # Re-aplicar el modelo que tenía antes del ruido
+        mapa = {
+            "BINARIO":          lambda m: procesadorImagen.conversion_imagen_opencv_binaria(m, umbral_previo if umbral_previo else 128),
+            "GRIS":             procesadorImagen.cargar_imagen_opencv_gris,
+            "HSV":              procesadorImagen.conversion_imagen_opencv_hsv,
+            "CMY":              procesadorImagen.conversion_imagen_opencv_cmy,
+            "YIQ":              procesadorImagen.conversion_imagen_opencv_yiq,
+            "HSI":              procesadorImagen.conversion_imagen_opencv_hsi,
+        }
+        fn = mapa.get(modelo_previo)
+        if fn:
+            resp2 = fn(self.imagen_metadata)
+            self.imagen_metadata = resp2["objeto"]
+            if resp2["error"]:
+                self._status(f"⚠  No se pudo restaurar el modelo {modelo_previo}: {resp2['mensaje']}", C["warn"])
+                return
+
+        # Actualizar base de binarización con los datos limpios
+        if self.imagen_metadata.modelo != "BINARIO":
+            self._base_bin_datos  = self.imagen_metadata.datos.copy()
+            self._base_bin_modelo = self.imagen_metadata.modelo
+
+        self._mostrar_imagen()
+        self.calcular_histograma()
+        self._status(f"✔  Ruido retirado — imagen restaurada desde disco  ·  {self.imagen_metadata.modelo}")
 
     # ── Operaciones lógicas ───────────────────────────────────────
 
@@ -1489,6 +1636,8 @@ class VentanaDashboard(QMainWindow):
         else:
             self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            self._base_bin_datos = None
+            self._base_bin_modelo = None
 
     def _seg_or(self):
         if not self._check() or not self._seg_check_imagen_b(): return
@@ -1498,6 +1647,8 @@ class VentanaDashboard(QMainWindow):
         else:
             self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            self._base_bin_datos = None
+            self._base_bin_modelo = None
 
     def _seg_xor(self):
         if not self._check() or not self._seg_check_imagen_b(): return
@@ -1507,6 +1658,8 @@ class VentanaDashboard(QMainWindow):
         else:
             self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            self._base_bin_datos = None
+            self._base_bin_modelo = None
 
     def _seg_not(self):
         if not self._check(): return
@@ -1516,6 +1669,8 @@ class VentanaDashboard(QMainWindow):
         else:
             self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            self._base_bin_datos = None
+            self._base_bin_modelo = None
 
     # ── Operaciones relacionales ──────────────────────────────────
 
@@ -1528,6 +1683,8 @@ class VentanaDashboard(QMainWindow):
         else:
             self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            self._base_bin_datos = None
+            self._base_bin_modelo = None
 
     def _seg_relacional_menor(self):
         if not self._check(): return
@@ -1538,6 +1695,8 @@ class VentanaDashboard(QMainWindow):
         else:
             self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            self._base_bin_datos = None
+            self._base_bin_modelo = None
 
     def _seg_relacional_igual(self):
         if not self._check(): return
@@ -1548,19 +1707,22 @@ class VentanaDashboard(QMainWindow):
         else:
             self._mostrar_imagen(es_derivable=False); self.calcular_histograma()
             self._status(f"✔  {resp['mensaje']}")
+            self._base_bin_datos = None
+            self._base_bin_modelo = None
 
     # ── Conteo de objetos ─────────────────────────────────────────
 
     def _seg_mostrar_conteo(self, resp4=None, resp8=None):
-        """Actualiza el label de resultado de conteo y abre la figura matplotlib."""
+        """Actualiza los labels de resultado de conteo y abre la figura matplotlib."""
         import matplotlib.pyplot as plt
         import cv2 as _cv2
 
         if resp4 and not resp4["error"] and resp8 is None:
             # Solo vecindad-4
             n = resp4["num_objetos"]
-            self.lbl_conteo_resultado.setText(f"Vecindad-4:  {n} objeto(s) detectado(s)")
-            self.lbl_conteo_resultado.setVisible(True)
+            self.lbl_conteo_v4.setText(f"Vecindad-4:  {n} objeto(s) detectado(s)")
+            self.lbl_conteo_v4.setVisible(True)
+            self.lbl_conteo_v8.setVisible(False)
 
             fig, axs = plt.subplots(1, 2, figsize=(12, 5))
             axs[0].imshow(resp4["labels"], cmap="jet")
@@ -1569,13 +1731,16 @@ class VentanaDashboard(QMainWindow):
             axs[1].imshow(_cv2.cvtColor(resp4["imagen_contornos"], _cv2.COLOR_BGR2RGB))
             axs[1].set_title("Contornos numerados")
             axs[1].axis("off")
-            plt.tight_layout(); plt.show()
+            plt.tight_layout()
+            self._fig_conteo = fig
+            plt.show()
 
         elif resp8 and not resp8["error"] and resp4 is None:
             # Solo vecindad-8
             n = resp8["num_objetos"]
-            self.lbl_conteo_resultado.setText(f"Vecindad-8:  {n} objeto(s) detectado(s)")
-            self.lbl_conteo_resultado.setVisible(True)
+            self.lbl_conteo_v4.setVisible(False)
+            self.lbl_conteo_v8.setText(f"Vecindad-8:  {n} objeto(s) detectado(s)")
+            self.lbl_conteo_v8.setVisible(True)
 
             fig, axs = plt.subplots(1, 2, figsize=(12, 5))
             axs[0].imshow(resp8["labels"], cmap="jet")
@@ -1584,14 +1749,17 @@ class VentanaDashboard(QMainWindow):
             axs[1].imshow(_cv2.cvtColor(resp8["imagen_contornos"], _cv2.COLOR_BGR2RGB))
             axs[1].set_title("Contornos numerados")
             axs[1].axis("off")
-            plt.tight_layout(); plt.show()
+            plt.tight_layout()
+            self._fig_conteo = fig
+            plt.show()
 
         elif resp4 and resp8:
-            # Comparación
+            # Comparación — mostrar ambos labels apilados
             n4, n8 = resp4["num_objetos"], resp8["num_objetos"]
-            self.lbl_conteo_resultado.setText(
-                f"Vecindad-4: {n4} obj.   |   Vecindad-8: {n8} obj.   |   Δ {abs(n4-n8)}")
-            self.lbl_conteo_resultado.setVisible(True)
+            self.lbl_conteo_v4.setText(f"Vecindad-4:  {n4} objeto(s)  ·  Δ {abs(n4-n8)}")
+            self.lbl_conteo_v8.setText(f"Vecindad-8:  {n8} objeto(s)")
+            self.lbl_conteo_v4.setVisible(True)
+            self.lbl_conteo_v8.setVisible(True)
 
             fig, axs = plt.subplots(2, 2, figsize=(14, 10))
             fig.suptitle(f"Comparación de vecindad  ·  [{self.imagen_metadata.nombre}]", fontsize=12)
@@ -1603,7 +1771,9 @@ class VentanaDashboard(QMainWindow):
             axs[1,0].set_title(f"V-8 etiquetas ({n8} obj.)"); axs[1,0].axis("off")
             axs[1,1].imshow(_cv2.cvtColor(resp8["imagen_contornos"], _cv2.COLOR_BGR2RGB))
             axs[1,1].set_title("V-8 contornos"); axs[1,1].axis("off")
-            plt.tight_layout(); plt.show()
+            plt.tight_layout()
+            self._fig_conteo = fig
+            plt.show()
 
     def _seg_vecindad_4(self):
         if not self._check(): return
@@ -1681,6 +1851,7 @@ class VentanaDashboard(QMainWindow):
         entrada.histograma   = self.imagen_metadata.histograma.copy()
         entrada.thumbnail    = pixmap
         entrada.es_derivable = es_derivable
+        entrada.es_resultado_logico = self.imagen_metadata.es_resultado_logico
         if not es_derivable:
             entrada.datos = self.imagen_metadata.datos.copy()
         self.historial_estados.append(entrada)
@@ -1726,9 +1897,10 @@ class VentanaDashboard(QMainWindow):
 
         # ── Rama rápida: estado no derivable ─────────────────────────────
         if not entrada.es_derivable and entrada.datos is not None:
-            self.imagen_metadata.datos  = entrada.datos.copy()
-            self.imagen_metadata.modelo = entrada.modelo
-            self.imagen_metadata.umbral = entrada.umbral
+            self.imagen_metadata.datos             = entrada.datos.copy()
+            self.imagen_metadata.modelo            = entrada.modelo
+            self.imagen_metadata.umbral            = entrada.umbral
+            self.imagen_metadata.es_resultado_logico = entrada.es_resultado_logico
             self._mostrar_imagen(registrar=False)
             self.calcular_histograma()
             self._status(f"↩  Estado restaurado: {entrada.nombre}  ·  {entrada.modelo}")
@@ -1748,7 +1920,7 @@ class VentanaDashboard(QMainWindow):
 
             # Actualizar chips y label del archivo en la UI
             nombre = self.imagen_metadata.nombre
-            self.lbl_info_archivo.setText(nombre)
+            self.lbl_info_archivo.setText(nombre[:42] + "…" if len(nombre) > 42 else nombre)
             self.chip_archivo.setText(nombre[:20] + "…" if len(nombre) > 20 else nombre)
 
         # Partir desde datos RGB limpios antes de aplicar el modelo guardado
@@ -1762,6 +1934,9 @@ class VentanaDashboard(QMainWindow):
         if resp["error"]:
             self._status(f"⚠  {resp['mensaje']}", C["warn"])
             return
+
+        # Restaurar flag de origen lógico
+        self.imagen_metadata.es_resultado_logico = entrada.es_resultado_logico
 
         # Actualizar el slider si el estado restaurado era una binarización manual
         if entrada.modelo == "BINARIO" and entrada.umbral is not None:

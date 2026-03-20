@@ -14,6 +14,7 @@ class metadataImagen:
         self.datos = None    # Array de NumPy (así se guarda la información de una imagen en Open CV)
         self.umbral = None   # El valor numérico del umbral que se utilizó para binarización
         self.histograma = {} # Diccionario: {'Canal': {'Media': 0.0, ...}}
+        self.es_resultado_logico = False  # True cuando la imagen proviene de AND/OR/XOR/NOT/Relacional
 
     def actualizar_modelo(self, nuevo_modelo):
         """Actualiza el modelo de color y la estampa de tiempo."""
