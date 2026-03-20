@@ -340,7 +340,8 @@ class VentanaDashboard(QMainWindow):
         super().__init__()
         self.imagen_metadata   = None
         self.imagen_metadata_b = None  # Imagen secundaria persistente para operaciones entre dos imágenes
-        self._datos_originales = None
+        self._datos_originales        = None  # Copia del archivo original — nunca cambia tras la carga
+        self._datos_binarizacion_base = None  # Base para binarizar: original o último resultado de segmentación
         self.historial_estados = []  # Lista de metadataHistorialImagen
         self._inicializar_cache()
         self._build_ui()
@@ -1201,7 +1202,8 @@ class VentanaDashboard(QMainWindow):
             self._status(f"⚠  {resp['mensaje']}", C["warn"])
             return
         # Guardar copia de los datos RGB originales para el slider de binarización
-        self._datos_originales = self.imagen_metadata.datos.copy()
+        self._datos_originales        = self.imagen_metadata.datos.copy()
+        self._datos_binarizacion_base = self.imagen_metadata.datos.copy()
         nombre = self.imagen_metadata.nombre
         self.lbl_info_archivo.setText(nombre)
         self.chip_archivo.setText(nombre[:20] + "…" if len(nombre) > 20 else nombre)
@@ -1233,10 +1235,12 @@ class VentanaDashboard(QMainWindow):
 
     def binarizar_manual(self):
         if not self._check(): return
-        # Restaurar datos originales antes de binarizar para que el slider pueda moverse libremente
-        if hasattr(self, '_datos_originales') and self._datos_originales is not None:
-            self.imagen_metadata.datos = self._datos_originales.copy()
-            self.imagen_metadata.modelo = "RGB"
+        # Restaurar desde la base de binarización para que el slider pueda moverse libremente.
+        # _datos_binarizacion_base apunta al original al cargar la imagen,
+        # y se actualiza cada vez que una operación de segmentación produce un resultado nuevo.
+        if self._datos_binarizacion_base is not None:
+            self.imagen_metadata.datos = self._datos_binarizacion_base.copy()
+            self.imagen_metadata.modelo = "RGB" if len(self._datos_binarizacion_base.shape) == 3 else "GRIS"
         u = self.slider.value()
         resp = procesadorImagen.conversion_imagen_opencv_binaria(self.imagen_metadata, u)
         self.imagen_metadata = resp["objeto"]
@@ -1249,11 +1253,10 @@ class VentanaDashboard(QMainWindow):
     def binarizar_otsu(self):
         if not self._check(): return
 
-        # Restaurar datos originales antes de binarizar, igual que binarizar_manual.
-        # Sin esto, si la imagen ya era BINARIO el controlador la rechaza.
-        if hasattr(self, '_datos_originales') and self._datos_originales is not None:
-            self.imagen_metadata.datos = self._datos_originales.copy()
-            self.imagen_metadata.modelo = "RGB"
+        # Restaurar desde la base de binarización (igual que binarizar_manual).
+        if self._datos_binarizacion_base is not None:
+            self.imagen_metadata.datos = self._datos_binarizacion_base.copy()
+            self.imagen_metadata.modelo = "RGB" if len(self._datos_binarizacion_base.shape) == 3 else "GRIS"
 
         resp = procesadorImagen.conversion_imagen_opencv_otsu(self.imagen_metadata)
         self.imagen_metadata = resp["objeto"]
@@ -1349,7 +1352,8 @@ class VentanaDashboard(QMainWindow):
         self.lbl_otsu_resultado.setText("")
         self.lbl_otsu_resultado.setVisible(False)
         if not resp["error"]:
-            self._datos_originales = self.imagen_metadata.datos.copy()
+            self._datos_originales        = self.imagen_metadata.datos.copy()
+            self._datos_binarizacion_base = self.imagen_metadata.datos.copy()  # reset también la base de binarización
             self._mostrar_imagen()
             self._status("✔  Imagen restablecida a RGB original")
             self.calcular_histograma()
@@ -1668,6 +1672,11 @@ class VentanaDashboard(QMainWindow):
         # Solo agregar al carrusel si es una acción nueva (no una restauración)
         if registrar:
             self._agregar_carrusel(pixmap, self.imagen_metadata.modelo, es_derivable)
+            # Actualizar la base de binarización cuando el resultado es no derivable
+            # (operaciones de segmentación: ruido, AND/OR/XOR, relacionales, etc.)
+            # Esto permite que el slider y Otsu trabajen sobre este resultado.
+            if not es_derivable:
+                self._datos_binarizacion_base = self.imagen_metadata.datos.copy()
 
     def _agregar_carrusel(self, pixmap, etiqueta, es_derivable=True):
         # Crear y guardar el estado en el historial

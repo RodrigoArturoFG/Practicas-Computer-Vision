@@ -46,213 +46,305 @@ def cargar_imagen_opencv_rgb(imagen_metadata):
     imagen_metadata.modelo = "RGB"
     return wrapper_respuesta(imagen_metadata)
 
-# Carga de imagen en escala de grises con OpenCV
-def cargar_imagen_opencv_gris(imagen_metadata):
-    """Lectura de imagen con OpenCV en grises."""
-    # 1. Validación de canales: si la imagen ya tiene un solo canal (Gris/Binaria)
-    if es_modelo_monocromatico(imagen_metadata.modelo):        
-        # La imagen ya se encuentra en escala de grises. Omitir conversión.
-        return wrapper_respuesta(imagen_metadata, False, "Parece que la imagen ya se encuentra en escala de grises. Omitiendo conversión para evitar errores.")
+# ──────────────────────────────────────────────────────────────
+#  HELPERS DE CONVERSIÓN EN MEMORIA
+# ──────────────────────────────────────────────────────────────
 
-    imagen_cv = cv2.imread(imagen_metadata.ruta)
-    if imagen_cv is None:
-        return wrapper_respuesta(imagen_metadata, False, f"No se pudo cargar la imagen en: {imagen_metadata.ruta}")
-    
-    # 2. Hacemos conversión de BGR a grises antes de devolver la imagen
-    imagen_metadata.datos = cv2.cvtColor(imagen_cv, cv2.COLOR_BGR2GRAY)
+def _a_rgb_en_memoria(imagen_metadata):
+    """
+    Convierte los datos actuales en memoria a RGB uint8 sin recargar desde disco.
+    Soporta todos los modelos internos del sistema.
+    Retorna: (datos_rgb_uint8, error:bool, mensaje:str)
+    """
+    datos = imagen_metadata.datos
+    modelo = imagen_metadata.modelo
+
+    if datos is None:
+        return None, True, "No hay imagen cargada en memoria."
+
+    try:
+        if modelo == "RGB":
+            return datos.astype(np.uint8), False, "OK"
+
+        if modelo in ("GRIS", "BINARIO"):
+            # Canal único → replicar a 3 canales
+            return cv2.cvtColor(datos, cv2.COLOR_GRAY2RGB), False, "OK"
+
+        if modelo == "HSV":
+            rgb = cv2.cvtColor(datos, cv2.COLOR_HSV2RGB)
+            return rgb, False, "OK"
+
+        if modelo == "CMY":
+            # CMY = 255 - RGB, invertir de vuelta
+            rgb = (255 - datos).astype(np.uint8)
+            return rgb, False, "OK"
+
+        if modelo == "YIQ":
+            # Datos en float [0,1] normalizados — deshacer normalización y aplicar
+            # matriz inversa NTSC (Y, I_norm, Q_norm → R, G, B)
+            y     = datos[:, :, 0]
+            i_raw = datos[:, :, 1] * 1.1914 - 0.5957   # desnormalizar I
+            q_raw = datos[:, :, 2] * 1.0452 - 0.5226   # desnormalizar Q
+            r = np.clip(y + 0.9563 * i_raw + 0.6210 * q_raw, 0, 1)
+            g = np.clip(y - 0.2721 * i_raw - 0.6474 * q_raw, 0, 1)
+            b = np.clip(y - 1.1070 * i_raw + 1.7046 * q_raw, 0, 1)
+            rgb = (cv2.merge([r, g, b]) * 255).astype(np.uint8)
+            return rgb, False, "OK"
+
+        if modelo == "HSI":
+            # Datos en float [0,1] (H_norm, S, I) — reconstruir RGB
+            h_rad = datos[:, :, 0] * 2 * np.pi   # desnormalizar H a [0, 2π]
+            s     = datos[:, :, 1]
+            intensity = datos[:, :, 2]
+            h_deg = np.degrees(h_rad) % 360
+
+            r = np.zeros_like(intensity)
+            g = np.zeros_like(intensity)
+            b = np.zeros_like(intensity)
+
+            # Sector 0°–120°
+            m1 = (h_deg >= 0) & (h_deg < 120)
+            b[m1] = intensity[m1] * (1 - s[m1])
+            r[m1] = intensity[m1] * (1 + s[m1] * np.cos(np.radians(h_deg[m1])) /
+                                     np.cos(np.radians(60 - h_deg[m1])))
+            g[m1] = 3 * intensity[m1] - (r[m1] + b[m1])
+
+            # Sector 120°–240°
+            m2 = (h_deg >= 120) & (h_deg < 240)
+            h2 = h_deg[m2] - 120
+            r[m2] = intensity[m2] * (1 - s[m2])
+            g[m2] = intensity[m2] * (1 + s[m2] * np.cos(np.radians(h2)) /
+                                     np.cos(np.radians(60 - h2)))
+            b[m2] = 3 * intensity[m2] - (r[m2] + g[m2])
+
+            # Sector 240°–360°
+            m3 = (h_deg >= 240) & (h_deg < 360)
+            h3 = h_deg[m3] - 240
+            g[m3] = intensity[m3] * (1 - s[m3])
+            b[m3] = intensity[m3] * (1 + s[m3] * np.cos(np.radians(h3)) /
+                                     np.cos(np.radians(60 - h3)))
+            r[m3] = 3 * intensity[m3] - (g[m3] + b[m3])
+
+            rgb = (np.clip(cv2.merge([r, g, b]), 0, 1) * 255).astype(np.uint8)
+            return rgb, False, "OK"
+
+        return None, True, f"Conversión a RGB no soportada desde el modelo '{modelo}'."
+
+    except Exception as e:
+        return None, True, f"Error al convertir '{modelo}' a RGB en memoria: {str(e)}"
+
+
+def _a_gris_en_memoria(imagen_metadata):
+    """
+    Convierte los datos actuales en memoria a escala de grises uint8
+    sin recargar desde disco.
+    Retorna: (datos_gris_uint8, error:bool, mensaje:str)
+    """
+    datos = imagen_metadata.datos
+    modelo = imagen_metadata.modelo
+
+    if datos is None:
+        return None, True, "No hay imagen cargada en memoria."
+
+    try:
+        if modelo in ("GRIS", "BINARIO"):
+            return datos.astype(np.uint8), False, "OK"
+
+        if modelo == "RGB":
+            return cv2.cvtColor(datos.astype(np.uint8), cv2.COLOR_RGB2GRAY), False, "OK"
+
+        if modelo == "HSV":
+            # V (brillo) es una buena aproximación de luminancia en HSV
+            return datos[:, :, 2].astype(np.uint8), False, "OK"
+
+        if modelo == "CMY":
+            # Deshacer CMY → RGB → gris
+            rgb = (255 - datos).astype(np.uint8)
+            return cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY), False, "OK"
+
+        if modelo == "YIQ":
+            # Y es exactamente la luminancia en YIQ
+            return (datos[:, :, 0] * 255).astype(np.uint8), False, "OK"
+
+        if modelo == "HSI":
+            # I es la intensidad en HSI
+            return (datos[:, :, 2] * 255).astype(np.uint8), False, "OK"
+
+        return None, True, f"Conversión a gris no soportada desde el modelo '{modelo}'."
+
+    except Exception as e:
+        return None, True, f"Error al convertir '{modelo}' a gris en memoria: {str(e)}"
+
+
+# ──────────────────────────────────────────────────────────────
+#  CARGA EN GRISES (ahora en memoria)
+# ──────────────────────────────────────────────────────────────
+
+def cargar_imagen_opencv_gris(imagen_metadata):
+    """Convierte la imagen actual en memoria a escala de grises."""
+    if es_modelo_monocromatico(imagen_metadata.modelo):
+        return wrapper_respuesta(imagen_metadata, False,
+            "La imagen ya se encuentra en escala de grises. Omitiendo conversión para evitar errores.")
+
+    datos_gris, error, mensaje = _a_gris_en_memoria(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
+
+    imagen_metadata.datos  = datos_gris
     imagen_metadata.modelo = "GRIS"
     return wrapper_respuesta(imagen_metadata)
 
-# Binarización con umbral dínamico
+
+# ──────────────────────────────────────────────────────────────
+#  BINARIZACIÓN
+# ──────────────────────────────────────────────────────────────
+
 def conversion_imagen_opencv_binaria(imagen_metadata, umbral=128):
-    """Binarización de imagen con umbral dínamico"""
-    # 1. Validación de canales: Si es color, la convertimos a gris primero
-    if es_modelo_monocromatico(imagen_metadata.modelo) == False:
-        respuesta = cargar_imagen_opencv_gris(imagen_metadata)
-        # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
-        imagen_metadata = respuesta["objeto"]
+    """Binarización con umbral dinámico trabajando sobre la imagen en memoria."""
+    if es_binaria(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "La imagen ya es binaria. Omitiendo conversión para evitar pérdida de datos.")
 
-        if respuesta["error"]:
-            return respuesta
-    # 2. Validación de contenido: ¿Ya es binaria?        
-    elif es_binaria(imagen_metadata):
-        # La imagen ya se encuentra binarizada. Se omitirá el proceso para evitar pérdida de datos.
-        # [Si se elige un umbral por debajo del valor mínimo o por encima del máximo (por ejemplo, un umbral de 256), 
-        # se perderá toda la información de la imagen.]
-        return wrapper_respuesta(imagen_metadata, False, "La imagen ya es binaria. Omitiendo conversión para evitar pérdida de datos.")
+    # Convertir a gris en memoria si es necesario
+    if not es_modelo_monocromatico(imagen_metadata.modelo):
+        datos_gris, error, mensaje = _a_gris_en_memoria(imagen_metadata)
+        if error:
+            return wrapper_respuesta(imagen_metadata, False, mensaje)
+        imagen_metadata.datos  = datos_gris
+        imagen_metadata.modelo = "GRIS"
 
-    imagen_metadata.umbral, imagen_metadata.datos = cv2.threshold(imagen_metadata.datos, umbral, 255, cv2.THRESH_BINARY)
+    imagen_metadata.umbral, imagen_metadata.datos = cv2.threshold(
+        imagen_metadata.datos, umbral, 255, cv2.THRESH_BINARY)
     imagen_metadata.modelo = "BINARIO"
     return wrapper_respuesta(imagen_metadata)
 
 
-# Binarización con umbral de Otsu
 def conversion_imagen_opencv_otsu(imagen_metadata):
     """
-    Aplica el algoritmo de Otsu para encontrar el umbral óptimo automáticamente.
+    Binarización automática con Otsu trabajando sobre la imagen en memoria.
     Actualiza el umbral real calculado en los metadatos.
     """
-    # 1. Validación de canales: Otsu requiere forzosamente una imagen de un solo canal (Gris)
-    #    Si es color, la convertimos a gris primero:
-    if es_modelo_monocromatico(imagen_metadata.modelo) == False:
-        respuesta = cargar_imagen_opencv_gris(imagen_metadata)
-        # Actualizamos nuestra referencia con el objeto que viene dentro de la respuesta
-        imagen_metadata = respuesta["objeto"]
+    if es_binaria(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "La imagen ya es binaria. Omitiendo conversión para evitar pérdida de datos.")
 
-        if respuesta["error"]:
-            return respuesta
-    elif es_binaria(imagen_metadata):
-        # La imagen ya se encuentra binarizada. Se omitirá el proceso para evitar pérdida de datos.
-        # [Si se elige un umbral por debajo del valor mínimo o por encima del máximo (por ejemplo, un umbral de 256), 
-        # se perderá toda la información de la imagen.]
-        return wrapper_respuesta(imagen_metadata, False, "La imagen ya es binaria. Omitiendo conversión para evitar pérdida de datos.")
-    
-    # Se aplica cv2.THRESH_OTSU sumado al binario normal
-    # 'umbral_calculado' recibirá el valor óptimo que Otsu encontró 
-    imagen_metadata.umbral, imagen_metadata.datos = cv2.threshold(imagen_metadata.datos, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Convertir a gris en memoria si es necesario
+    if not es_modelo_monocromatico(imagen_metadata.modelo):
+        datos_gris, error, mensaje = _a_gris_en_memoria(imagen_metadata)
+        if error:
+            return wrapper_respuesta(imagen_metadata, False, mensaje)
+        imagen_metadata.datos  = datos_gris
+        imagen_metadata.modelo = "GRIS"
+
+    imagen_metadata.umbral, imagen_metadata.datos = cv2.threshold(
+        imagen_metadata.datos, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     imagen_metadata.modelo = "BINARIO"
     return wrapper_respuesta(imagen_metadata)
 
-# Cambiar modelo de color a HSV
+
+# ──────────────────────────────────────────────────────────────
+#  CONVERSIONES DE MODELO DE COLOR (ahora en memoria)
+# ──────────────────────────────────────────────────────────────
+
 def conversion_imagen_opencv_hsv(imagen_metadata):
-    """
-    Convierte de RGB a HSV con validación de entrada.
-    """
-    # 1. Validación: Si la imagen ya es HSV (tomando en cuenta metadatos de la imagen)
+    """Convierte la imagen actual en memoria a HSV."""
     if es_HSV(imagen_metadata):
-        return wrapper_respuesta(imagen_metadata, False, "La imagen ya esta en un modelo HSV. Omitiendo conversión para evitar errores.")
-    # 2. Validación: Si la imagen ya es Gris/Binaria (2D)
-    elif es_modelo_monocromatico(imagen_metadata.modelo):
-        # Covertir imagen Gris/Binaria a RGB 
-        imagen_cv = cv2.imread(imagen_metadata.ruta)
-        if imagen_cv is None:
-            return wrapper_respuesta(imagen_metadata, False, f"No se pudo cargar la imagen en: {imagen_metadata.ruta}")
-        imagen_metadata.datos = imagen_cv
+        return wrapper_respuesta(imagen_metadata, False,
+            "La imagen ya esta en un modelo HSV. Omitiendo conversión para evitar errores.")
 
-    # 3. Conversión segura
-    imagen_metadata.datos = cv2.cvtColor(imagen_metadata.datos, cv2.COLOR_RGB2HSV)
+    datos_rgb, error, mensaje = _a_rgb_en_memoria(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
+
+    imagen_metadata.datos  = cv2.cvtColor(datos_rgb, cv2.COLOR_RGB2HSV)
     imagen_metadata.modelo = "HSV"
-    
     return wrapper_respuesta(imagen_metadata)
 
-# Cambiar modelo de color a CMY
+
 def conversion_imagen_opencv_cmy(imagen_metadata):
-    """
-    Simula el modelo CMY con protección contra re-inversión.
-    """
-    # 1. Validación: Si la imagen ya es CMY
+    """Convierte la imagen actual en memoria a CMY (inversión de canales RGB)."""
     if es_CMY(imagen_metadata):
-        return wrapper_respuesta(imagen_metadata, False, "La imagen ya esta en un modelo CMY. Omitiendo conversión para evitar errores.")
-    # 2. Validación: Si la imagen esta en otro modelo que no es RGB ni CMY
-    elif es_RGB(imagen_metadata) == False:
-        # Covertir imagen Gris/Binaria a RGB 
-        imagen_cv = cv2.imread(imagen_metadata.ruta)
-        if imagen_cv is None:
-            return wrapper_respuesta(imagen_metadata, False, f"No se pudo cargar la imagen en: {imagen_metadata.ruta}")
-        imagen_metadata.datos = imagen_cv
+        return wrapper_respuesta(imagen_metadata, False,
+            "La imagen ya esta en un modelo CMY. Omitiendo conversión para evitar errores.")
 
+    datos_rgb, error, mensaje = _a_rgb_en_memoria(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
 
-    # 3. Conversión segura
-    print("Aplicando modelo CMY (Inversión de canales RGB)...")
-    imagen_metadata.datos = 255 - imagen_metadata.datos
+    imagen_metadata.datos  = 255 - datos_rgb
     imagen_metadata.modelo = "CMY"
-    
     return wrapper_respuesta(imagen_metadata)
+
 
 def conversion_imagen_opencv_yiq(imagen_metadata):
-    """Convierte de RGB a YIQ usando la matriz de transformación NTSC."""
-    # 1. Validación: Si la imagen ya es YIQ
+    """Convierte la imagen actual en memoria a YIQ usando la matriz NTSC."""
     if es_YIQ(imagen_metadata):
-        return wrapper_respuesta(imagen_metadata, False, "La imagen ya esta en un modelo YIQ. Omitiendo conversión para evitar errores.")
-    # 2. Validación: Si la imagen esta en otro modelo que no es RGB ni YIQ
-    elif es_RGB(imagen_metadata) == False:
-        # Covertir imagen Gris/Binaria a RGB 
-        imagen_cv = cv2.imread(imagen_metadata.ruta)
-        if imagen_cv is None:
-            return wrapper_respuesta(imagen_metadata, False, f"No se pudo cargar la imagen en: {imagen_metadata.ruta}")
-        imagen_metadata.datos = imagen_cv
+        return wrapper_respuesta(imagen_metadata, False,
+            "La imagen ya esta en un modelo YIQ. Omitiendo conversión para evitar errores.")
+
+    datos_rgb, error, mensaje = _a_rgb_en_memoria(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
 
     try:
-        # 1. Convertir a float 0-1 para el cálculo
-        img_float = imagen_metadata.datos.astype(np.float32) / 255.0
+        img_float = datos_rgb.astype(np.float32) / 255.0
         r, g, b = cv2.split(img_float)
 
-        # 2. Fórmulas NTSC
         y = 0.299 * r + 0.587 * g + 0.114 * b
         i = 0.596 * r - 0.274 * g - 0.322 * b
         q = 0.211 * r - 0.523 * g + 0.312 * b
 
-        # 3. NORMALIZACIÓN para evitar el "Clipping error"
-        # Escalamos I y Q de su rango teórico [-0.6, 0.6] a [0, 1]
-        # Esto permite que Matplotlib y OpenCV los manejen sin problemas
         i_norm = (i + 0.5957) / 1.1914
         q_norm = (q + 0.5226) / 1.0452
-        
-        # Aseguramos que los valores estén estrictamente entre 0 y 1
-        y = np.clip(y, 0, 1)
+
+        y      = np.clip(y,      0, 1)
         i_norm = np.clip(i_norm, 0, 1)
         q_norm = np.clip(q_norm, 0, 1)
 
-        # 4. Guardar como float32 (Matplotlib lo entiende perfecto si es 0-1)
-        imagen_metadata.datos = cv2.merge([y, i_norm, q_norm])
+        imagen_metadata.datos  = cv2.merge([y, i_norm, q_norm])
         imagen_metadata.modelo = "YIQ"
-        
-        
         return wrapper_respuesta(imagen_metadata)
-        
     except Exception as e:
         return wrapper_respuesta(imagen_metadata, False, f"Error en YIQ: {str(e)}")
 
+
 def conversion_imagen_opencv_hsi(imagen_metadata):
-    """Convierte de RGB a HSI usando la matriz de transformación NTSC."""
-    # 1. Validación: Si la imagen ya es HSI
-    if es_YIQ(imagen_metadata):
-        return wrapper_respuesta(imagen_metadata, False, "La imagen ya esta en un modelo HSI. Omitiendo conversión para evitar errores.")
-    elif es_RGB(imagen_metadata) == False:
-        # Covertir imagen Gris/Binaria a RGB 
-        imagen_cv = cv2.imread(imagen_metadata.ruta)
-        if imagen_cv is None:
-            return wrapper_respuesta(imagen_metadata, False, f"No se pudo cargar la imagen en: {imagen_metadata.ruta}")
-        imagen_metadata.datos = imagen_cv
+    """Convierte la imagen actual en memoria a HSI."""
+    if es_HSI(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "La imagen ya esta en un modelo HSI. Omitiendo conversión para evitar errores.")
+
+    datos_rgb, error, mensaje = _a_rgb_en_memoria(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
 
     try:
-        # 1. Normalizar RGB a [0, 1] para cálculos precisos
-        img_float = imagen_metadata.datos.astype(np.float32) / 255.0
+        img_float = datos_rgb.astype(np.float32) / 255.0
         r, g, b = cv2.split(img_float)
 
-        # 2. Intensidad (Promedio aritmético)
         intensity = (r + g + b) / 3.0
 
-        # 3. Saturación
         min_rgb = np.minimum(np.minimum(r, g), b)
-        # Evitar división por cero si la intensidad es 0 (negro)
         denominador_s = (r + g + b + 1e-6)
         saturation = 1 - (3 / denominador_s * min_rgb)
 
-        # 4. Matiz (Hue) - Algoritmo trigonométrico
-        num = 0.5 * ((r - g) + (r - b))
-        den = np.sqrt((r - g)**2 + (r - b) * (g - b)) + 1e-6
-        theta = np.arccos(np.clip(num / den, -1, 1)) # Clip para evitar errores de precisión en arccos
+        num   = 0.5 * ((r - g) + (r - b))
+        den   = np.sqrt((r - g)**2 + (r - b) * (g - b)) + 1e-6
+        theta = np.arccos(np.clip(num / den, -1, 1))
 
-        hue = theta
-        hue[b > g] = 2 * np.pi - hue[b > g] # Ajustar el círculo cromático
-        
-        # NORMALIZACIÓN CRÍTICA:
-        # Convertimos Hue de [0, 2pi] a [0, 1] para que Matplotlib lo entienda
+        hue = theta.copy()
+        hue[b > g] = 2 * np.pi - hue[b > g]
         hue_norm = hue / (2 * np.pi)
 
-        # 5. Empaquetar y asegurar rango [0, 1] para evitar Clipping
         hsi_final = cv2.merge([
-            np.clip(hue_norm, 0, 1), 
-            np.clip(saturation, 0, 1), 
-            np.clip(intensity, 0, 1)
+            np.clip(hue_norm,   0, 1),
+            np.clip(saturation, 0, 1),
+            np.clip(intensity,  0, 1)
         ])
 
-        imagen_metadata.datos = hsi_final
+        imagen_metadata.datos  = hsi_final
         imagen_metadata.modelo = "HSI"
-
         return wrapper_respuesta(imagen_metadata)
-
     except Exception as e:
         return wrapper_respuesta(imagen_metadata, False, f"Error en HSI: {str(e)}")
 
@@ -317,30 +409,25 @@ def _preparar_imagen_binaria(imagen_metadata):
     limpio antes de cualquier operación que lo requiera (ruido, vecindad, lógicas).
 
     Lógica canónica:
-      - Ya es BINARIO → recarga desde disco y re-aplica imagen_metadata.umbral,
-        que puede ser un valor elegido por el usuario desde la UI. De este modo
-        el umbral que el usuario seleccionó se respeta en todas las operaciones
-        posteriores y no se sobreescribe con uno automático.
-      - Cualquier otro modelo → binariza con Otsu (umbral óptimo automático)
-        y guarda el valor calculado en imagen_metadata.umbral.
-
-    En ambos casos la imagen se recarga desde disco para descartar cualquier
-    ruido o modificación acumulada en memoria.
+      - Ya es BINARIO → recarga desde disco (RGB limpio) y re-aplica
+        imagen_metadata.umbral elegido por el usuario.
+      - Cualquier otro modelo → binariza con Otsu sobre los datos actuales
+        en memoria y guarda el umbral calculado.
 
     Retorna: wrapper_respuesta con imagen_metadata en modelo BINARIO.
     """
     if es_binaria(imagen_metadata):
-        # Respetar el umbral elegido por el usuario (o 128 si nunca se definió)
+        # Guardar umbral antes de recargar (la recarga lo resetearía)
         umbral_previo = imagen_metadata.umbral if imagen_metadata.umbral is not None else 128
 
-        # Reset temporal a "RGB" para que cargar_imagen_opencv_gris no rechace
-        # la imagen por ya ser monocromática (GRIS o BINARIO).
-        imagen_metadata.modelo = "RGB"
-        respuesta_gris = cargar_imagen_opencv_gris(imagen_metadata)
-        imagen_metadata = respuesta_gris["objeto"]
-        if respuesta_gris["error"]:
-            return respuesta_gris
+        # Recargar desde disco como RGB limpio — esto produce datos de 3 canales
+        # válidos y descarta cualquier ruido o modificación acumulada en memoria.
+        respuesta_rgb = cargar_imagen_opencv_rgb(imagen_metadata)
+        imagen_metadata = respuesta_rgb["objeto"]
+        if respuesta_rgb["error"]:
+            return respuesta_rgb
 
+        # Re-binarizar con el umbral del usuario
         respuesta_bin = conversion_imagen_opencv_binaria(imagen_metadata, umbral_previo)
         imagen_metadata = respuesta_bin["objeto"]
         if respuesta_bin["error"]:
@@ -351,7 +438,7 @@ def _preparar_imagen_binaria(imagen_metadata):
             f"Imagen binaria recargada limpia (umbral={umbral_previo})"
         )
     else:
-        # Primera vez que se binariza: Otsu calcula el umbral óptimo y lo guarda
+        # No es binaria aún: aplicar Otsu sobre datos actuales en memoria
         respuesta_otsu = conversion_imagen_opencv_otsu(imagen_metadata)
         imagen_metadata = respuesta_otsu["objeto"]
         if respuesta_otsu["error"]:
@@ -369,23 +456,18 @@ def _preparar_imagen_gris(imagen_metadata):
     (sin ruido acumulado) antes de aplicar ruido gaussiano.
 
     Casos:
-      - Ya es GRIS   : recarga desde disco para descartar ruido previo.
-      - Es BINARIO   : recarga desde disco como gris (la naturaleza binaria
-                       se pierde al aplicar gaussiano, esto es esperado).
-      - Cualquier otro modelo (RGB, HSV, etc.): convierte a gris directamente.
+      - Ya es GRIS o BINARIO: convierte en memoria usando _a_gris_en_memoria
+        (GRIS devuelve los datos tal cual, BINARIO los devuelve como uint8).
+      - Cualquier otro modelo (RGB, HSV, etc.): convierte a gris en memoria.
 
     Retorna: wrapper_respuesta con imagen_metadata en modelo GRIS.
     """
-    if es_modelo_monocromatico(imagen_metadata.modelo):
-        # Resetear modelo a "RGB" para que cargar_imagen_opencv_gris
-        # no rechace la imagen por ya ser monocromática.
-        imagen_metadata.modelo = "RGB"
+    datos_gris, error, mensaje = _a_gris_en_memoria(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
 
-    respuesta_gris = cargar_imagen_opencv_gris(imagen_metadata)
-    imagen_metadata = respuesta_gris["objeto"]
-    if respuesta_gris["error"]:
-        return respuesta_gris
-
+    imagen_metadata.datos  = datos_gris
+    imagen_metadata.modelo = "GRIS"
     return wrapper_respuesta(imagen_metadata, True, "Imagen preparada en escala de grises.")
 
 
@@ -714,13 +796,32 @@ def not_imagen(imagen_a):
 
 def _preparar_imagen_para_relacional(imagen_metadata):
     """
-    Garantiza que la imagen esté en escala de grises para las operaciones relacionales.
-    Si es BINARIO o GRIS recarga desde disco limpio; si es color convierte a gris.
-    Retorna: wrapper_respuesta con imagen en modelo GRIS.
+    Prepara la imagen para operaciones relacionales trabajando sobre los datos
+    que ya están en memoria, sin recargar desde disco.
+
+    Casos:
+      - GRIS o BINARIO: ya tiene un solo canal, se usa directamente tal como está.
+        Esto permite aplicar relacionales sobre una imagen ya binarizada y observar
+        el resultado sobre esa representación.
+      - Color (RGB, HSV, CMY, etc.): convierte a gris en memoria usando los datos
+        actuales, sin tocar el archivo original en disco.
+
+    Retorna: wrapper_respuesta con imagen en modelo GRIS (o BINARIO si ya lo era).
     """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+
+    # GRIS o BINARIO: un solo canal, listo para comparar directamente
     if es_modelo_monocromatico(imagen_metadata.modelo):
-        imagen_metadata.modelo = "RGB"   # reset para saltar la guardia de cargar_gris
-    return cargar_imagen_opencv_gris(imagen_metadata)
+        return wrapper_respuesta(imagen_metadata, True, "Imagen lista para operación relacional.")
+
+    # Color: convertir a gris en memoria (cv2.cvtColor sobre datos actuales)
+    try:
+        imagen_metadata.datos  = cv2.cvtColor(imagen_metadata.datos, cv2.COLOR_RGB2GRAY)
+        imagen_metadata.modelo = "GRIS"
+        return wrapper_respuesta(imagen_metadata, True, "Imagen convertida a gris para operación relacional.")
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error al convertir a gris: {str(e)}")
 
 
 def relacional_mayor(imagen_metadata, umbral):
