@@ -181,16 +181,20 @@ def _a_gris_en_memoria(imagen_metadata):
 # ──────────────────────────────────────────────────────────────
 
 def cargar_imagen_opencv_gris(imagen_metadata):
-    """Convierte la imagen actual en memoria a escala de grises."""
+    """Lectura de imagen con OpenCV en grises desde disco."""
+    # 1. Validación de canales: si la imagen ya tiene un solo canal (Gris/Binaria)
     if es_modelo_monocromatico(imagen_metadata.modelo):
+        # La imagen ya se encuentra en escala de grises. Omitir conversión.
         return wrapper_respuesta(imagen_metadata, False,
-            "La imagen ya se encuentra en escala de grises. Omitiendo conversión para evitar errores.")
+            "Parece que la imagen ya se encuentra en escala de grises. Omitiendo conversión para evitar errores.")
 
-    datos_gris, error, mensaje = _a_gris_en_memoria(imagen_metadata)
-    if error:
-        return wrapper_respuesta(imagen_metadata, False, mensaje)
+    imagen_cv = cv2.imread(imagen_metadata.ruta)
+    if imagen_cv is None:
+        return wrapper_respuesta(imagen_metadata, False,
+            f"No se pudo cargar la imagen en: {imagen_metadata.ruta}")
 
-    imagen_metadata.datos  = datos_gris
+    # Hacemos conversión de BGR a grises antes de devolver la imagen
+    imagen_metadata.datos  = cv2.cvtColor(imagen_cv, cv2.COLOR_BGR2GRAY)
     imagen_metadata.modelo = "GRIS"
     return wrapper_respuesta(imagen_metadata)
 
@@ -200,18 +204,17 @@ def cargar_imagen_opencv_gris(imagen_metadata):
 # ──────────────────────────────────────────────────────────────
 
 def conversion_imagen_opencv_binaria(imagen_metadata, umbral=128):
-    """Binarización con umbral dinámico trabajando sobre la imagen en memoria."""
-    if es_binaria(imagen_metadata):
+    """Binarización con umbral dinámico."""
+    # Si es color, convertir a gris primero (desde disco)
+    if es_modelo_monocromatico(imagen_metadata.modelo) == False:
+        respuesta = cargar_imagen_opencv_gris(imagen_metadata)
+        imagen_metadata = respuesta["objeto"]
+        if respuesta["error"]:
+            return respuesta
+    # ¿Ya es binaria?
+    elif es_binaria(imagen_metadata):
         return wrapper_respuesta(imagen_metadata, False,
             "La imagen ya es binaria. Omitiendo conversión para evitar pérdida de datos.")
-
-    # Convertir a gris en memoria si es necesario
-    if not es_modelo_monocromatico(imagen_metadata.modelo):
-        datos_gris, error, mensaje = _a_gris_en_memoria(imagen_metadata)
-        if error:
-            return wrapper_respuesta(imagen_metadata, False, mensaje)
-        imagen_metadata.datos  = datos_gris
-        imagen_metadata.modelo = "GRIS"
 
     imagen_metadata.umbral, imagen_metadata.datos = cv2.threshold(
         imagen_metadata.datos, umbral, 255, cv2.THRESH_BINARY)
@@ -221,20 +224,18 @@ def conversion_imagen_opencv_binaria(imagen_metadata, umbral=128):
 
 def conversion_imagen_opencv_otsu(imagen_metadata):
     """
-    Binarización automática con Otsu trabajando sobre la imagen en memoria.
+    Binarización automática con Otsu.
     Actualiza el umbral real calculado en los metadatos.
     """
-    if es_binaria(imagen_metadata):
+    # Otsu requiere imagen de un solo canal (Gris): convertir desde disco si es color
+    if es_modelo_monocromatico(imagen_metadata.modelo) == False:
+        respuesta = cargar_imagen_opencv_gris(imagen_metadata)
+        imagen_metadata = respuesta["objeto"]
+        if respuesta["error"]:
+            return respuesta
+    elif es_binaria(imagen_metadata):
         return wrapper_respuesta(imagen_metadata, False,
             "La imagen ya es binaria. Omitiendo conversión para evitar pérdida de datos.")
-
-    # Convertir a gris en memoria si es necesario
-    if not es_modelo_monocromatico(imagen_metadata.modelo):
-        datos_gris, error, mensaje = _a_gris_en_memoria(imagen_metadata)
-        if error:
-            return wrapper_respuesta(imagen_metadata, False, mensaje)
-        imagen_metadata.datos  = datos_gris
-        imagen_metadata.modelo = "GRIS"
 
     imagen_metadata.umbral, imagen_metadata.datos = cv2.threshold(
         imagen_metadata.datos, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)

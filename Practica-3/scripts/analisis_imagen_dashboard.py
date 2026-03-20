@@ -1235,48 +1235,48 @@ class VentanaDashboard(QMainWindow):
 
     def binarizar_manual(self):
         if not self._check(): return
-        # Restaurar desde la base de binarización para que el slider pueda moverse libremente.
-        # _datos_binarizacion_base apunta al original al cargar la imagen,
-        # y se actualiza cada vez que una operación de segmentación produce un resultado nuevo.
-        if self._datos_binarizacion_base is not None:
-            self.imagen_metadata.datos = self._datos_binarizacion_base.copy()
-            self.imagen_metadata.modelo = "RGB" if len(self._datos_binarizacion_base.shape) == 3 else "GRIS"
-        u = self.slider.value()
-        resp = procesadorImagen.conversion_imagen_opencv_binaria(self.imagen_metadata, u)
-        self.imagen_metadata = resp["objeto"]
-        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
-        else:
-            self._mostrar_imagen()
-            self._status(f"✔  Binarización aplicada  ·  Umbral: {u}")
-            self.calcular_histograma()
+        try:
+            # Restaurar datos originales antes de binarizar para que el slider pueda moverse libremente
+            if hasattr(self, '_datos_originales') and self._datos_originales is not None:
+                self.imagen_metadata.datos = self._datos_originales.copy()
+                self.imagen_metadata.modelo = "RGB"
+            u = self.slider.value()
+            resp = procesadorImagen.conversion_imagen_opencv_binaria(self.imagen_metadata, u)
+            self.imagen_metadata = resp["objeto"]
+            if resp["error"]:
+                self._status(f"⚠  {resp['mensaje']}", C["warn"])
+            else:
+                self._mostrar_imagen()
+                self._status(f"✔  Binarización aplicada  ·  Umbral: {u}")
+                self.calcular_histograma()
+        except Exception as e:
+            self._status(f"⚠  Error en binarizar_manual: {type(e).__name__}: {e}", C["warn"])
 
     def binarizar_otsu(self):
         if not self._check(): return
+        try:
+            # Restaurar datos originales antes de binarizar, igual que binarizar_manual.
+            if hasattr(self, '_datos_originales') and self._datos_originales is not None:
+                self.imagen_metadata.datos = self._datos_originales.copy()
+                self.imagen_metadata.modelo = "RGB"
 
-        # Restaurar desde la base de binarización (igual que binarizar_manual).
-        if self._datos_binarizacion_base is not None:
-            self.imagen_metadata.datos = self._datos_binarizacion_base.copy()
-            self.imagen_metadata.modelo = "RGB" if len(self._datos_binarizacion_base.shape) == 3 else "GRIS"
-
-        resp = procesadorImagen.conversion_imagen_opencv_otsu(self.imagen_metadata)
-        self.imagen_metadata = resp["objeto"]
-        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
-        else:
-            u = self.imagen_metadata.umbral
-
-            # Sincronizar slider con el umbral calculado.
-            # blockSignals evita que valueChanged dispare binarizar_manual()
-            # encima del resultado de Otsu.
-            self.slider.blockSignals(True)
-            self.slider.setValue(int(u) if u else 128)
-            self.lbl_umbral.setText(f"Umbral: {int(u) if u else 128}")
-            self.slider.blockSignals(False)
-
-            self.lbl_otsu_resultado.setText(f"Umbral óptimo encontrado: {int(u) if u else '—'}")
-            self.lbl_otsu_resultado.setVisible(True)
-            self._mostrar_imagen()
-            self._status(f"✔  Otsu  ·  Umbral: {int(u) if u else '—'}")
-            self.calcular_histograma()
+            resp = procesadorImagen.conversion_imagen_opencv_otsu(self.imagen_metadata)
+            self.imagen_metadata = resp["objeto"]
+            if resp["error"]:
+                self._status(f"⚠  {resp['mensaje']}", C["warn"])
+            else:
+                u = self.imagen_metadata.umbral
+                self.slider.blockSignals(True)
+                self.slider.setValue(int(u) if u else 128)
+                self.lbl_umbral.setText(f"Umbral: {int(u) if u else 128}")
+                self.slider.blockSignals(False)
+                self.lbl_otsu_resultado.setText(f"Umbral óptimo encontrado: {int(u) if u else '—'}")
+                self.lbl_otsu_resultado.setVisible(True)
+                self._mostrar_imagen()
+                self._status(f"✔  Otsu  ·  Umbral: {int(u) if u else '—'}")
+                self.calcular_histograma()
+        except Exception as e:
+            self._status(f"⚠  Error en binarizar_otsu: {type(e).__name__}: {e}", C["warn"])
 
     def mostrar_capas(self):
         if not self._check(): return
@@ -1672,11 +1672,6 @@ class VentanaDashboard(QMainWindow):
         # Solo agregar al carrusel si es una acción nueva (no una restauración)
         if registrar:
             self._agregar_carrusel(pixmap, self.imagen_metadata.modelo, es_derivable)
-            # Actualizar la base de binarización cuando el resultado es no derivable
-            # (operaciones de segmentación: ruido, AND/OR/XOR, relacionales, etc.)
-            # Esto permite que el slider y Otsu trabajen sobre este resultado.
-            if not es_derivable:
-                self._datos_binarizacion_base = self.imagen_metadata.datos.copy()
 
     def _agregar_carrusel(self, pixmap, etiqueta, es_derivable=True):
         # Crear y guardar el estado en el historial
