@@ -112,11 +112,11 @@ python gui_practica_1.py
 
 # Practica 2
 cd Practica-2/scripts
-python practica_2_prototipo.py
+python analisis_imagen_dashboard.py
 
 # Practica 3
 cd Practica-3/scripts
-python practica_3_prototipo.py
+python analisis_imagen_dashboard.py
 ```
 
 ---
