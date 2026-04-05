@@ -133,9 +133,9 @@ python analisis_imagen_dashboard.py
 cd Practica-4/scripts
 python analisis_imagen_dashboard.py
 
-# Practica 4 — Prototipo de consola (pruebas rapidas)
+# Practica 4 
 cd Practica-4/scripts
-python practica_4_prototipo.py
+python analisis_imagen_dashboard.py
 ```
 
 ---
