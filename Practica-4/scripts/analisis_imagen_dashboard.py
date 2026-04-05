@@ -1,6 +1,6 @@
 # =====================================================================
 # PRÁCTICA 4 - "MM BINARIA Y EN LATTICES"
-# VERSIÓN 3: Layout 3 Paneles (Dashboard)
+# VERSIÓN 4.0: Layout 3 Paneles (Dashboard)
 # Autor: Rodrigo Arturo Fernández González
 # Fecha: 01-04-2026
 # UI desarrollada con PyQt5
