@@ -3,3 +3,7 @@ numpy
 matplotlib
 scipy
 PyQt5
+
+# Opcional: mejora el algoritmo de adelgazamiento morfológico (Zhang-Suen)
+# Si no está instalado, se usa el algoritmo iterativo HIPR2 como fallback
+# opencv-contrib-python

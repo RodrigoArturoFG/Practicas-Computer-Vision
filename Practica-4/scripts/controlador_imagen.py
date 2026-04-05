@@ -916,6 +916,580 @@ def analizar_vecindad_8(imagen_metadata):
 
 
 # ══════════════════════════════════════════════════════════════
+#  MORFOLOGÍA MATEMÁTICA
+# ══════════════════════════════════════════════════════════════
+
+def _preparar_imagen_morfologia(imagen_metadata):
+    """
+    Valida que la imagen sea BINARIO o GRIS para operaciones morfológicas.
+    Retorna: (datos_uint8, error:bool, mensaje:str)
+    """
+    if imagen_metadata.datos is None:
+        return None, True, "No hay imagen cargada."
+    if not (es_binaria(imagen_metadata) or es_gris(imagen_metadata)):
+        return None, True, "El modelo de la imagen debe ser binario o escala de grises para aplicar morfología matemática."
+    return imagen_metadata.datos.astype(np.uint8), False, "OK"
+
+
+def _construir_kernel(kernel_size, forma="disco"):
+    """
+    Construye el elemento estructurante (kernel) según la forma indicada.
+
+    Formas disponibles:
+      - "cuadrado": np.ones() — todos los píxeles activos, produce efectos más
+                    agresivos en las esquinas pero puede distorsionar formas convexas.
+      - "disco"   : cv2.MORPH_ELLIPSE — aproximación circular, preserva mejor la
+                    forma de objetos convexos y produce bordes más naturales.
+                    Recomendado por HIPR2 para kernels grandes (>= 7×7).
+
+    Retorna: (kernel ndarray, etiqueta str)
+    """
+    forma = forma.lower()
+    if forma == "cuadrado":
+        kernel = np.ones((kernel_size, kernel_size), np.uint8)
+        etiqueta = f"cuadrado {kernel_size}×{kernel_size}"
+    else:
+        # "disco" como valor por defecto ante cualquier entrada no reconocida
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        etiqueta = f"disco {kernel_size}×{kernel_size}"
+    return kernel, etiqueta
+
+
+def erosion(imagen_metadata, kernel_size=11, iteraciones=2, forma="disco"):
+    """
+    Aplica erosión morfológica a una imagen BINARIA o en escala de GRIS.
+    - Binaria: reduce el área de las regiones blancas; los agujeros crecen.
+    - Grises:  reemplaza cada píxel por el mínimo local → imagen más oscura.
+
+    Parámetros:
+      kernel_size : tamaño del EE (default=11, agresivo pero visible).
+      iteraciones : número de pasadas (default=2).
+      forma       : "disco" (preserva formas convexas) o "cuadrado" (más agresivo
+                    en esquinas). Default="disco" según recomendación HIPR2.
+
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    datos, error, mensaje = _preparar_imagen_morfologia(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
+    try:
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+        imagen_metadata.datos = cv2.erode(datos, kernel, iterations=iteraciones)
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Erosión aplicada — EE: {etiqueta}, iter={iteraciones}, modelo: {imagen_metadata.modelo}"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en erosión: {str(e)}")
+
+
+def dilatacion(imagen_metadata, kernel_size=11, iteraciones=2, forma="disco"):
+    """
+    Aplica dilatación morfológica a una imagen BINARIA o en escala de GRIS.
+    - Binaria: incrementa el área de las regiones blancas; los agujeros se reducen.
+    - Grises:  reemplaza cada píxel por el máximo local → imagen más brillante.
+
+    Parámetros:
+      kernel_size : tamaño del EE (default=11).
+      iteraciones : número de pasadas (default=2).
+      forma       : "disco" o "cuadrado" (default="disco").
+
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    datos, error, mensaje = _preparar_imagen_morfologia(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
+    try:
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+        imagen_metadata.datos = cv2.dilate(datos, kernel, iterations=iteraciones)
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Dilatación aplicada — EE: {etiqueta}, iter={iteraciones}, modelo: {imagen_metadata.modelo}"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en dilatación: {str(e)}")
+
+
+def apertura(imagen_metadata, kernel_size=11, iteraciones=1, forma="disco"):
+    """
+    Aplica apertura morfológica (erosión → dilatación) a una imagen BINARIA o en escala de GRIS.
+    Elimina ruido pequeño (sal) y objetos más pequeños que el EE, conservando
+    las regiones que pueden contener completamente al EE (idempotente).
+
+    Parámetros:
+      kernel_size : tamaño del EE (default=11).
+      iteraciones : número de pasadas (default=1; la apertura es idempotente).
+      forma       : "disco" o "cuadrado" (default="disco").
+
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    datos, error, mensaje = _preparar_imagen_morfologia(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
+    try:
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+        imagen_metadata.datos = cv2.morphologyEx(datos, cv2.MORPH_OPEN, kernel, iterations=iteraciones)
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Apertura aplicada — EE: {etiqueta}, iter={iteraciones}, modelo: {imagen_metadata.modelo}"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en apertura: {str(e)}")
+
+
+def cierre(imagen_metadata, kernel_size=22, iteraciones=1, forma="disco"):
+    """
+    Aplica cierre morfológico (dilatación → erosión) a una imagen BINARIA o en escala de GRIS.
+    Rellena agujeros y huecos más pequeños que el EE, conservando los más grandes
+    (idempotente). Complementario a la apertura.
+
+    Parámetros:
+      kernel_size : tamaño del EE (default=22, permite rellenar huecos medianos).
+      iteraciones : número de pasadas (default=1; el cierre es idempotente).
+      forma       : "disco" o "cuadrado" (default="disco").
+
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    datos, error, mensaje = _preparar_imagen_morfologia(imagen_metadata)
+    if error:
+        return wrapper_respuesta(imagen_metadata, False, mensaje)
+    try:
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+        imagen_metadata.datos = cv2.morphologyEx(datos, cv2.MORPH_CLOSE, kernel, iterations=iteraciones)
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Cierre aplicado — EE: {etiqueta}, iter={iteraciones}, modelo: {imagen_metadata.modelo}"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en cierre: {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════
+#  MORFOLOGÍA BINARIA AVANZADA
+# ══════════════════════════════════════════════════════════════
+
+def frontera(imagen_metadata, kernel_size=3, forma="disco"):
+    """
+    Extrae la frontera (borde interno) de una imagen BINARIA.
+    Fórmula: frontera = imagen AND NOT(erosión(imagen))
+    Equivalente a sustraer la erosión de la imagen original.
+    Produce un borde de 1 píxel de grosor (4-conectado con EE cuadrado,
+    8-conectado con EE disco).
+
+    Parámetros:
+      kernel_size : tamaño del EE (default=3; borde de 1px).
+      forma       : "disco" o "cuadrado" (default="disco").
+
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    if not es_binaria(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "La frontera morfológica requiere imagen BINARIA. Binariza primero.")
+    try:
+        datos = imagen_metadata.datos.astype(np.uint8)
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+        erosionada = cv2.erode(datos, kernel, iterations=1)
+        imagen_metadata.datos = cv2.subtract(datos, erosionada)
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Frontera extraída — EE: {etiqueta}"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en frontera: {str(e)}")
+
+
+def hit_or_miss(imagen_metadata, tipo_ee="esquina"):
+    """
+    Transformada Hit-or-Miss: detecta patrones específicos de píxeles
+    de primer plano Y fondo simultáneamente en una imagen BINARIA.
+    Es la operación morfológica más general — todas las demás derivan de ella.
+
+    Convención OpenCV MORPH_HITMISS (≠ convención intuitiva):
+      1  = foreground requerido (hit)
+     -1  = background requerido (miss)
+      0  = don't care
+
+    Tipos de EE disponibles:
+      "esquina"       : detecta las 4 esquinas CONVEXAS de 90° (HIPR2 kerncrn).
+      "punto_aislado" : detecta píxeles completamente rodeados de fondo.
+      "extremo_linea" : detecta extremos de líneas delgadas (8 direcciones).
+
+    Parámetros:
+      tipo_ee : patrón a detectar (default="esquina").
+
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    if not es_binaria(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "Hit-or-Miss requiere imagen BINARIA. Binariza primero.")
+    try:
+        datos = imagen_metadata.datos.astype(np.uint8)
+
+        # ── Convención OpenCV: 1=FG, -1=BG, 0=DC ──────────────────────────
+        # SEs según HIPR2 (hitmiss.htm, kerncrn1.gif / kerncrn2.gif / hamapps.gif)
+        ees = {
+            "esquina": [
+                # Esquina convexa superior-derecha (objeto extiende hacia arriba y derecha)
+                # HIPR2 kerncrn1.gif base SE, 4 rotaciones de 90° CW
+                np.array([[ 0,  1,  0], [-1,  1,  1], [-1, -1,  0]], dtype=np.int32),  # 0°
+                np.array([[-1, -1,  0], [-1,  1,  1], [ 0,  1,  0]], dtype=np.int32),  # 90°
+                np.array([[ 0, -1, -1], [ 1,  1, -1], [ 0,  1,  0]], dtype=np.int32),  # 180°
+                np.array([[ 0,  1,  0], [ 1,  1, -1], [ 0, -1, -1]], dtype=np.int32),  # 270°
+            ],
+            "punto_aislado": [
+                # Píxel rodeado COMPLETAMENTE de fondo — todos los vecinos -1 (BG)
+                # HIPR2 hamapps.gif patrón 1
+                np.array([[-1, -1, -1], [-1,  1, -1], [-1, -1, -1]], dtype=np.int32),
+            ],
+            "extremo_linea": [
+                # Extremo de línea: centro FG conectado a UN único vecino FG.
+                # Restantes vecinos BG (-1). Diagonales adyacentes al vecino conectado = DC (0).
+                # 8 direcciones (HIPR2 usa 4 cardinales; se agregan 4 diagonales para
+                # detectar también extremos de líneas en 45°).
+                #
+                # Cardinales:
+                np.array([[ 0,  1,  0], [-1,  1, -1], [-1, -1, -1]], dtype=np.int32),  # N
+                np.array([[-1, -1,  0], [-1,  1,  1], [-1, -1,  0]], dtype=np.int32),  # E
+                np.array([[-1, -1, -1], [-1,  1, -1], [ 0,  1,  0]], dtype=np.int32),  # S
+                np.array([[ 0, -1, -1], [ 1,  1, -1], [ 0, -1, -1]], dtype=np.int32),  # O
+                # Diagonales:
+                np.array([[-1,  0,  1], [-1,  1,  0], [-1, -1, -1]], dtype=np.int32),  # NE
+                np.array([[-1, -1, -1], [-1,  1,  0], [-1,  0,  1]], dtype=np.int32),  # SE
+                np.array([[-1, -1, -1], [ 0,  1, -1], [ 1,  0, -1]], dtype=np.int32),  # SO
+                np.array([[ 1,  0, -1], [ 0,  1, -1], [-1, -1, -1]], dtype=np.int32),  # NO
+            ],
+        }
+
+        # ── Caso especial: punto_aislado ──────────────────────────────────
+        # El HMT puro solo detecta píxeles ÚNICOS aislados (1 px de área).
+        # En imágenes reales los "puntos" son blobs de varios píxeles, por lo
+        # que se usa análisis de componentes conexas: se retienen las regiones
+        # cuya área ≤ umbral adaptivo (1 % del área total de la imagen).
+        # Ref: Gonzalez & Woods, cap. morfología — detección de puntos aislados.
+        if tipo_ee == "punto_aislado":
+            h_img, w_img = datos.shape[:2]
+            umbral_area = max(1, int(h_img * w_img * 0.01))
+            n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+                datos, connectivity=8)
+            acumulado = np.zeros_like(datos)
+            n_detectados = 0
+            for lbl in range(1, n_labels):   # 0 = fondo
+                if stats[lbl, cv2.CC_STAT_AREA] <= umbral_area:
+                    acumulado[labels == lbl] = 255
+                    n_detectados += 1
+            imagen_metadata.datos = acumulado
+            return wrapper_respuesta(
+                imagen_metadata, True,
+                f"Hit-or-Miss (punto aislado): {n_detectados} región(es) ≤ {umbral_area} px² detectadas"
+            )
+
+        # ── Caso general: esquina / extremo_linea ─────────────────────────
+        lista_ee = ees.get(tipo_ee)
+        if lista_ee is None:
+            return wrapper_respuesta(imagen_metadata, False,
+                f"Tipo de EE desconocido: '{tipo_ee}'. Usa: {list(ees.keys())}")
+
+        acumulado = np.zeros_like(datos)
+        for ee in lista_ee:
+            resultado = cv2.morphologyEx(datos, cv2.MORPH_HITMISS, ee)
+            acumulado = cv2.bitwise_or(acumulado, resultado)
+
+        imagen_metadata.datos = acumulado
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Hit-or-Miss aplicado — patrón: '{tipo_ee}', {len(lista_ee)} EE(s) combinados con OR"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en hit-or-miss: {str(e)}")
+
+
+def adelgazamiento(imagen_metadata):
+    """
+    Adelgazamiento morfológico: reduce regiones del primer plano a líneas
+    de 1 píxel de grosor preservando la conectividad y los extremos de líneas.
+    Definición HIPR2: imagen AND NOT(hit-or-miss(imagen, EE)), iterado hasta convergencia
+    con 8 EEs (2 base × 4 rotaciones de 90°).
+
+    Intenta usar cv2.ximgproc.thinning() (Zhang-Suen) si opencv-contrib está disponible.
+    Si no, ejecuta el algoritmo iterativo con los 8 EEs del HIPR2.
+
+    Requiere imagen BINARIA.
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    if not es_binaria(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "El adelgazamiento requiere imagen BINARIA. Binariza primero.")
+    try:
+        datos = imagen_metadata.datos.astype(np.uint8)
+
+        # Intentar opencv-contrib (Zhang-Suen) — más robusto y garantiza conectividad
+        try:
+            resultado = cv2.ximgproc.thinning(datos, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
+            metodo = "Zhang-Suen (opencv-contrib)"
+        except AttributeError:
+            # Fallback: algoritmo iterativo con 8 EEs del HIPR2
+            # EEs base para esqueletización por adelgazamiento (Fig. 1 de thin.htm)
+            ee_base = [
+                np.array([[ 0, 0, 0],[-1, 1,-1],[ 1, 1, 1]], dtype=np.int32),
+                np.array([[-1, 0, 0],[ 1, 1, 0],[-1, 1,-1]], dtype=np.int32),
+            ]
+            # Generar 4 rotaciones de cada EE base → 8 EEs en total
+            lista_ee = []
+            for ee in ee_base:
+                for k in range(4):
+                    lista_ee.append(np.rot90(ee, k))
+
+            resultado = datos.copy()
+            while True:
+                anterior = resultado.copy()
+                for ee in lista_ee:
+                    hitmiss = cv2.morphologyEx(resultado, cv2.MORPH_HITMISS, ee)
+                    resultado = cv2.subtract(resultado, hitmiss)
+                if np.array_equal(resultado, anterior):
+                    break  # Convergencia
+            metodo = "iterativo HIPR2 (8 EEs)"
+
+        imagen_metadata.datos = resultado
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Adelgazamiento aplicado — método: {metodo}"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en adelgazamiento: {str(e)}")
+
+
+def esqueleto(imagen_metadata, kernel_size=3, forma="disco"):
+    """
+    Esqueleto morfológico (algoritmo de Lantuéjoul).
+    Calcula la unión de diferencias entre erosiones sucesivas y sus aperturas:
+      S(img) = UNION_{k=0..K} [ erosion^k(img) - apertura(erosion^k(img)) ]
+    donde K es el número de iteraciones hasta que la erosión produce imagen vacía.
+
+    A diferencia del adelgazamiento, este método produce un esqueleto más grueso
+    que representa el eje medial de la forma. El resultado puede reconstruirse
+    aproximadamente aplicando dilataciones sucesivas.
+
+    Parámetros:
+      kernel_size : tamaño del EE (default=3).
+      forma       : "disco" o "cuadrado" (default="disco").
+
+    Requiere imagen BINARIA.
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    if not es_binaria(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "El esqueleto morfológico requiere imagen BINARIA. Binariza primero.")
+    try:
+        datos = imagen_metadata.datos.astype(np.uint8)
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+
+        esqueleto_acumulado = np.zeros_like(datos)
+        imagen_actual = datos.copy()
+        iteraciones = 0
+
+        while True:
+            # apertura de la erosión actual
+            abierta = cv2.morphologyEx(imagen_actual, cv2.MORPH_OPEN, kernel)
+            # contribución de esta iteración al esqueleto
+            contribucion = cv2.subtract(imagen_actual, abierta)
+            esqueleto_acumulado = cv2.bitwise_or(esqueleto_acumulado, contribucion)
+            # erosionar para siguiente iteración
+            imagen_actual = cv2.erode(imagen_actual, kernel, iterations=1)
+            iteraciones += 1
+            # Parar cuando la erosión produce imagen vacía
+            if cv2.countNonZero(imagen_actual) == 0:
+                break
+
+        imagen_metadata.datos = esqueleto_acumulado
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Esqueleto morfológico calculado — EE: {etiqueta}, {iteraciones} iteraciones"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en esqueleto: {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════
+#  MORFOLOGÍA EN LATICCES (GRISES)
+# ══════════════════════════════════════════════════════════════
+
+def gradiente_morfologico(imagen_metadata, tipo="simetrico", kernel_size=5, forma="disco"):
+    """
+    Gradiente morfológico en escala de grises. Resalta bordes y transiciones
+    de intensidad. Existen tres variantes según HIPR2:
+
+      "simetrico"  : dilatación - erosión  → borde simétrico, más grueso.
+                     Disponible en OpenCV como cv2.MORPH_GRADIENT.
+      "dilatacion" : dilatación - imagen   → borde externo (resalta lado claro).
+      "erosion"    : imagen - erosión      → borde interno (resalta lado oscuro).
+
+    Parámetros:
+      tipo        : "simetrico" | "dilatacion" | "erosion" (default="simetrico").
+      kernel_size : tamaño del EE (default=5).
+      forma       : "disco" o "cuadrado" (default="disco").
+
+    Requiere imagen GRIS.
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    if not es_gris(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "El gradiente morfológico requiere imagen en ESCALA DE GRISES.")
+    try:
+        datos = imagen_metadata.datos.astype(np.uint8)
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+
+        if tipo == "simetrico":
+            resultado = cv2.morphologyEx(datos, cv2.MORPH_GRADIENT, kernel)
+            desc = "simétrico (dilatación − erosión)"
+        elif tipo == "dilatacion":
+            dilatada = cv2.dilate(datos, kernel)
+            resultado = cv2.subtract(dilatada, datos)
+            desc = "por dilatación (dilatación − imagen)"
+        elif tipo == "erosion":
+            erosionada = cv2.erode(datos, kernel)
+            resultado = cv2.subtract(datos, erosionada)
+            desc = "por erosión (imagen − erosión)"
+        else:
+            return wrapper_respuesta(imagen_metadata, False,
+                f"Tipo desconocido: '{tipo}'. Usa: simetrico | dilatacion | erosion")
+
+        imagen_metadata.datos = resultado
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Gradiente morfológico {desc} — EE: {etiqueta}"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en gradiente morfológico: {str(e)}")
+
+
+def top_hat(imagen_metadata, kernel_size=11, forma="disco"):
+    """
+    Transformada Top Hat: imagen - apertura(imagen).
+    Resalta estructuras brillantes MÁS PEQUEÑAS que el EE (picos de intensidad,
+    manchas claras sobre fondo oscuro, texto claro).
+    El resultado es una imagen de grises donde solo aparecen
+    las estructuras que el EE no pudo contener durante la apertura.
+
+    Parámetros:
+      kernel_size : tamaño del EE (default=11).
+      forma       : "disco" o "cuadrado" (default="disco").
+
+    Requiere imagen GRIS.
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    if not es_gris(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "Top Hat requiere imagen en ESCALA DE GRISES.")
+    try:
+        datos = imagen_metadata.datos.astype(np.uint8)
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+        imagen_metadata.datos = cv2.morphologyEx(datos, cv2.MORPH_TOPHAT, kernel)
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Top Hat aplicado — EE: {etiqueta}  (imagen − apertura)"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en top hat: {str(e)}")
+
+
+def bot_hat(imagen_metadata, kernel_size=11, forma="disco"):
+    """
+    Transformada Bot Hat / Black Hat: cierre(imagen) - imagen.
+    Resalta estructuras OSCURAS más pequeñas que el EE (valles de intensidad,
+    manchas oscuras sobre fondo claro, texto oscuro).
+    Complementaria al Top Hat: donde Top Hat detecta picos, Bot Hat detecta valles.
+
+    Parámetros:
+      kernel_size : tamaño del EE (default=11).
+      forma       : "disco" o "cuadrado" (default="disco").
+
+    Requiere imagen GRIS.
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    if not es_gris(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "Bot Hat requiere imagen en ESCALA DE GRISES.")
+    try:
+        datos = imagen_metadata.datos.astype(np.uint8)
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+        imagen_metadata.datos = cv2.morphologyEx(datos, cv2.MORPH_BLACKHAT, kernel)
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Bot Hat aplicado — EE: {etiqueta}  (cierre − imagen)"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en bot hat: {str(e)}")
+
+
+def suavizado_morfologico(imagen_metadata, kernel_size=5, forma="disco", orden="apertura_cierre"):
+    """
+    Filtro de suavizado morfológico combinando apertura y cierre.
+    Suaviza la imagen eliminando tanto ruido sal (píxeles brillantes)
+    como ruido pimienta (píxeles oscuros) de forma secuencial.
+
+    Variantes (según HIPR2 morphological filters):
+      "apertura_cierre" : apertura → cierre.
+                          Elimina primero sal (brillantes), luego pimienta (oscuros).
+      "cierre_apertura" : cierre → apertura.
+                          Elimina primero pimienta (oscuros), luego sal (brillantes).
+
+    La apertura y el cierre son idempotentes individualmente, pero su combinación
+    produce un efecto de suavizado sin ser idempotente — aplicar dos veces puede
+    diferir ligeramente de una sola aplicación.
+
+    Parámetros:
+      kernel_size : tamaño del EE (default=5).
+      forma       : "disco" o "cuadrado" (default="disco").
+      orden       : "apertura_cierre" | "cierre_apertura" (default="apertura_cierre").
+
+    Requiere imagen GRIS.
+    Retorna: wrapper_respuesta con imagen_metadata actualizada.
+    """
+    if imagen_metadata.datos is None:
+        return wrapper_respuesta(imagen_metadata, False, "No hay imagen cargada.")
+    if not es_gris(imagen_metadata):
+        return wrapper_respuesta(imagen_metadata, False,
+            "El suavizado morfológico requiere imagen en ESCALA DE GRISES.")
+    try:
+        datos = imagen_metadata.datos.astype(np.uint8)
+        kernel, etiqueta = _construir_kernel(kernel_size, forma)
+
+        if orden == "apertura_cierre":
+            paso1 = cv2.morphologyEx(datos,  cv2.MORPH_OPEN,  kernel)
+            resultado = cv2.morphologyEx(paso1, cv2.MORPH_CLOSE, kernel)
+            desc = "apertura → cierre"
+        elif orden == "cierre_apertura":
+            paso1 = cv2.morphologyEx(datos,  cv2.MORPH_CLOSE, kernel)
+            resultado = cv2.morphologyEx(paso1, cv2.MORPH_OPEN,  kernel)
+            desc = "cierre → apertura"
+        else:
+            return wrapper_respuesta(imagen_metadata, False,
+                f"Orden desconocido: '{orden}'. Usa: apertura_cierre | cierre_apertura")
+
+        imagen_metadata.datos = resultado
+        return wrapper_respuesta(
+            imagen_metadata, True,
+            f"Suavizado morfológico aplicado — orden: {desc}, EE: {etiqueta}"
+        )
+    except Exception as e:
+        return wrapper_respuesta(imagen_metadata, False, f"Error en suavizado morfológico: {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════
 #  HELPERS — VALIDACIÓN DE MODELO
 # ══════════════════════════════════════════════════════════════
 
@@ -1244,3 +1818,53 @@ def guardar_conteo_vecindad(imagen_metadata, carpeta_destino):
     except Exception as e:
         plt.close("all")
         return {"error": True, "mensaje": f"Error al guardar conteo: {str(e)}", "archivos": []}
+    """
+    Genera la visualización de canales separados en alta resolución y la guarda en disco.
+    Nombre: <base>_<MODELO>_canales_<timestamp>.png
+    Devuelve: { "error": bool, "mensaje": str, "archivos": [rutas] }
+    """
+    try:
+        if imagen_metadata.datos is None:
+            return {"error": True, "mensaje": "No hay imagen cargada.", "archivos": []}
+
+        conf    = obtener_config_modelo(imagen_metadata.modelo)
+        nombres = conf["nombres"]
+        mapas   = conf["cmaps"]
+
+        datos = imagen_metadata.datos
+        canales = [datos] if len(datos.shape) == 2 else cv2.split(datos)
+        n = len(canales)
+
+        bg = "#080C10"; fg = "#CDD9E5"
+        fig, axes = plt.subplots(1, n, figsize=(5 * n, 5), dpi=150)
+        fig.patch.set_facecolor(bg)
+        if n == 1:
+            axes = [axes]
+
+        for i, (c, ax) in enumerate(zip(canales, axes)):
+            ax.set_facecolor(bg)
+            nombre = nombres[i] if nombres and i < len(nombres) else f"Canal {i + 1}"
+            cmap   = mapas[i]   if mapas   and i < len(mapas)   else "gray"
+            ax.imshow(c, cmap=cmap)
+            ax.set_title(nombre, color=fg, fontsize=11)
+            ax.axis("off")
+
+        fig.suptitle(
+            f"Canales  ·  {imagen_metadata.modelo}  ·  {imagen_metadata.nombre}",
+            color=fg, fontsize=12
+        )
+        plt.tight_layout()
+
+        ts   = _generar_timestamp()
+        base = _nombre_base(imagen_metadata)
+        nombre_archivo = f"{base}_{imagen_metadata.modelo}_canales_{ts}.png"
+        ruta = os.path.join(carpeta_destino, nombre_archivo)
+
+        fig.savefig(ruta, dpi=150, bbox_inches="tight", facecolor=bg)
+        plt.close(fig)
+
+        return {"error": False, "mensaje": f"Canales guardados: {nombre_archivo}", "archivos": [ruta]}
+
+    except Exception as e:
+        plt.close("all")
+        return {"error": True, "mensaje": f"Error al guardar canales: {str(e)}", "archivos": []}

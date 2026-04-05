@@ -20,6 +20,10 @@ ENV/
 # Caché local de la aplicación
 **/.ultimo_directorio.txt
 
+# --- Contexto de sesión (Claude) ---
+# Archivo de contexto para sesiones con Claude Code — no se sube al repo
+CONTEXTO.md
+
 # --- Sistema Operativo ---
 .DS_Store
 Thumbs.db

@@ -1,8 +1,8 @@
 # =====================================================================
-# PRÁCTICA 3 - "CONTEO DE OBJETOS"
-# VERSIÓN 2: Layout 3 Paneles (Dashboard)
+# PRÁCTICA 4 - "MM BINARIA Y EN LATTICES"
+# VERSIÓN 3: Layout 3 Paneles (Dashboard)
 # Autor: Rodrigo Arturo Fernández González
-# Fecha: 10-03-2026
+# Fecha: 01-04-2026
 # UI desarrollada con PyQt5
 # =====================================================================
 
@@ -160,13 +160,17 @@ QComboBox {{
 QComboBox:focus {{ border-color: {C['accent']}; }}
 QComboBox QAbstractItemView {{
     background: {C['surface2']};
-    color: #000000;
+    color: {C['text']};
     border: 1px solid {C['accent']};
     selection-background-color: {C['accent_dim']};
     selection-color: {C['accent']};
     outline: none;
+    padding: 4px 0px;
 }}
 QComboBox::drop-down {{ border: none; width: 20px; }}
+QComboBox::down-arrow {{
+    width: 10px; height: 10px;
+}}
 
 /* ── Slider ─────────────────────────────── */
 QSlider::groove:horizontal {{
@@ -275,14 +279,47 @@ QFrame#vline {{
 
 
 # ══════════════════════════════════════════════════════════════
-#  DELEGATE  —  Fuerza color de texto en ComboBox dropdown
+#  DELEGATE  —  Resalta ítem seleccionado en ComboBox dropdown
 # ══════════════════════════════════════════════════════════════
 class DarkTextDelegate(QStyledItemDelegate):
-    """Fuerza el texto a negro en el dropdown del ComboBox (override de Windows)."""
+    """
+    Pinta cada ítem del dropdown con texto claro sobre fondo oscuro,
+    coherente con el tema general del dashboard.
+    El ítem actualmente seleccionado se resalta con el color accent.
+    """
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
-        option.palette.setColor(option.palette.Text, QColor("#111111"))
-        option.palette.setColor(option.palette.HighlightedText, QColor("#00D4AA"))
+        # Texto siempre claro — visible sobre surface2
+        option.palette.setColor(option.palette.Text, QColor(C["text"]))
+        # Texto resaltado en accent cuando el mouse pasa por encima
+        option.palette.setColor(option.palette.HighlightedText, QColor(C["accent"]))
+
+
+class CenteredComboBox(QComboBox):
+    """
+    QComboBox con texto centrado en Windows/PyQt5.
+    text-align:center en stylesheet no funciona con el renderizador nativo de Windows,
+    por eso se sobreescribe paintEvent para dibujar el texto manualmente centrado.
+    """
+    def paintEvent(self, _event):
+        from PyQt5.QtWidgets import QStylePainter, QStyleOptionComboBox, QStyle
+        painter = QStylePainter(self)
+        opt = QStyleOptionComboBox()
+        self.initStyleOption(opt)
+
+        # Dibuja el control completo excepto el texto
+        opt.currentText = ""
+        painter.drawComplexControl(QStyle.CC_ComboBox, opt)
+
+        # Dibuja el texto centrado manualmente
+        painter.setPen(QColor(C["text"]))
+        font = self.font()
+        painter.setFont(font)
+        # Área disponible: rect del widget menos el espacio del botón desplegable
+        text_rect = self.style().subControlRect(
+            QStyle.CC_ComboBox, opt, QStyle.SC_ComboBoxEditField, self
+        )
+        painter.drawText(text_rect, Qt.AlignCenter, self.currentText())
 
 
 # ══════════════════════════════════════════════════════════════
@@ -471,6 +508,7 @@ class VentanaDashboard(QMainWindow):
         """)
         tabs.addTab(self._make_tab_preprocesamiento(), "PREPROCESAMIENTO")
         tabs.addTab(self._make_tab_segmentacion(),     "SEGMENTACIÓN")
+        tabs.addTab(self._make_tab_morfologia(),       "MORFOLOGÍA")
         outer.addWidget(tabs, 1)
 
         # ── Footer fijo: Guardar imagen ─────────────
@@ -510,9 +548,10 @@ class VentanaDashboard(QMainWindow):
 
         # ── 2. Modelo de color ──────────────────
         layout.addWidget(self._section_label("02  ·  MODELO DE COLOR"))
-        self.combo_modelo = QComboBox()
+        self.combo_modelo = CenteredComboBox()
         self.combo_modelo.addItems(["RGB", "HSV", "CMY", "YIQ", "HSI", "Escala de Grises"])
         self.combo_modelo.setItemDelegate(DarkTextDelegate(self.combo_modelo))
+        self.combo_modelo.setStyleSheet(self._combo_style())
         layout.addWidget(self.combo_modelo)
 
         btn_modelo = QPushButton("Aplicar Modelo →")
@@ -901,11 +940,404 @@ class VentanaDashboard(QMainWindow):
         layout.addStretch()
         return scroll
 
+
+    def _make_tab_morfologia(self):
+        """Pestaña de Morfología: operaciones básicas, binaria avanzada y en laticces."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("border:none; background:transparent;")
+        inner_w = QWidget()
+        inner_w.setStyleSheet(f"background: {C['surface']};")
+        layout = QVBoxLayout(inner_w)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        scroll.setWidget(inner_w)
+
+        def _constrain_width(event, _scroll=scroll, _inner=inner_w):
+            _inner.setMaximumWidth(_scroll.viewport().width())
+            QScrollArea.resizeEvent(_scroll, event)
+        scroll.resizeEvent = _constrain_width
+
+        btn_style_mm  = self._btn_style_accion()
+        btn_style_mmas = f"""
+            QPushButton {{ background: {C['accent_dim']}; color: {C['accent']}; border: 1px solid {C['accent']}; border-radius: 4px; font-size: 14pt; font-weight: bold; padding: 0px; }}
+            QPushButton:hover {{ background: {C['accent']}; color: #ffffff; }}
+        """
+
+        # ── Helper interno: slider con etiquetas y botones +/- ──────────────
+        def _slider_row(parent_layout, attr_slider, attr_lbl, rango, defecto, texto_lbl, fmt):
+            """
+            Crea un slider con botones −/+ y label de valor, y los añade a parent_layout.
+            Retorna (slider, lbl_valor).
+            """
+            fila_s = QHBoxLayout()
+            lbl_lo = QLabel(str(rango[0])); lbl_lo.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+            lbl_hi = QLabel(str(rango[1])); lbl_hi.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(*rango)
+            slider.setValue(defecto)
+            lbl_val = QLabel(fmt.format(defecto))
+            lbl_val.setAlignment(Qt.AlignCenter)
+            lbl_val.setStyleSheet(f"color:{C['accent']}; font-size:12pt; font-weight:bold;")
+            slider.valueChanged.connect(lambda v, _l=lbl_val, _f=fmt: _l.setText(_f.format(v)))
+            fila_s.addWidget(lbl_lo); fila_s.addWidget(slider); fila_s.addWidget(lbl_hi)
+            parent_layout.addLayout(fila_s)
+
+            btn_m = QPushButton(" − "); btn_m.setFixedWidth(36)
+            btn_m.setCursor(Qt.PointingHandCursor); btn_m.setStyleSheet(btn_style_mmas)
+            btn_m.clicked.connect(lambda: slider.setValue(max(rango[0], slider.value() - 1)))
+            btn_p = QPushButton(" + "); btn_p.setFixedWidth(36)
+            btn_p.setCursor(Qt.PointingHandCursor); btn_p.setStyleSheet(btn_style_mmas)
+            btn_p.clicked.connect(lambda: slider.setValue(min(rango[1], slider.value() + 1)))
+            fila_ctrl = QHBoxLayout()
+            fila_ctrl.addWidget(btn_m); fila_ctrl.addWidget(lbl_val, 1); fila_ctrl.addWidget(btn_p)
+            parent_layout.addLayout(fila_ctrl)
+            return slider, lbl_val
+
+        # ── Helper: ComboBox forma EE ────────────────────────────────────────
+        def _combo_forma(parent_layout):
+            lbl = self._make_sublabel("Forma del EE:")
+            parent_layout.addWidget(lbl)
+            combo = CenteredComboBox()
+            combo.addItems(["Disco  (bordes naturales)", "Cuadrado  (más agresivo)"])
+            combo.setItemDelegate(DarkTextDelegate(combo))
+            combo.setStyleSheet(self._combo_style())
+            parent_layout.addWidget(combo)
+            return combo
+
+        def _forma_str(combo):
+            return "disco" if combo.currentIndex() == 0 else "cuadrado"
+
+        # ══════════════════════════════════════════
+        # 01 · MORFOLOGÍA BÁSICA
+        # ══════════════════════════════════════════
+        layout.addWidget(self._section_label("01  ·  MORFOLOGÍA BÁSICA"))
+        layout.addWidget(self._make_sublabel("Requiere: BINARIO o GRIS"))
+
+        self.combo_ee_basica = _combo_forma(layout)
+
+        layout.addWidget(self._make_sublabel("Tamaño del EE (kernel):"))
+        self.slider_mm_kernel, self.lbl_mm_kernel = _slider_row(
+            layout, "slider_mm_kernel", "lbl_mm_kernel", (3, 31), 11, None, "Kernel: {0}×{0}")
+
+        layout.addWidget(self._make_sublabel("Iteraciones:"))
+        self.slider_mm_iter, self.lbl_mm_iter = _slider_row(
+            layout, "slider_mm_iter", "lbl_mm_iter", (1, 10), 1, None, "Iter: {0}")
+
+        fila_bas = QGridLayout()
+        fila_bas.setSpacing(6)
+        for col, (texto, slot) in enumerate([
+            ("⊖  Erosión",   self._mm_erosion),
+            ("⊕  Dilatación", self._mm_dilatacion),
+            ("◯  Apertura",  self._mm_apertura),
+            ("●  Cierre",    self._mm_cierre),
+        ]):
+            b = QPushButton(texto)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(btn_style_mm)
+            b.clicked.connect(slot)
+            fila_bas.addWidget(b, col // 2, col % 2)
+        layout.addLayout(fila_bas)
+
+        layout.addWidget(self._hline())
+
+        # ══════════════════════════════════════════
+        # 02 · MORFOLOGÍA BINARIA AVANZADA
+        # ══════════════════════════════════════════
+        layout.addWidget(self._section_label("02  ·  MORFOLOGÍA BINARIA"))
+        layout.addWidget(self._make_sublabel("Requiere: BINARIO"))
+
+        self.combo_ee_binaria = _combo_forma(layout)
+
+        layout.addWidget(self._make_sublabel("Tamaño del EE (frontera / esqueleto):"))
+        self.slider_mm_bin_kernel, self.lbl_mm_bin_kernel = _slider_row(
+            layout, None, None, (3, 15), 3, None, "Kernel: {0}×{0}")
+
+        # Hit-or-Miss: selector de patrón
+        layout.addWidget(self._make_sublabel("Patrón Hit-or-Miss:"))
+        self.combo_hitmiss = CenteredComboBox()
+        self.combo_hitmiss.addItems([
+            "Esquina (4 rotaciones)",
+            "Punto aislado",
+            "Extremo de línea (4 rotaciones)",
+        ])
+        self.combo_hitmiss.setItemDelegate(DarkTextDelegate(self.combo_hitmiss))
+        self.combo_hitmiss.setStyleSheet(self._combo_style())
+        layout.addWidget(self.combo_hitmiss)
+
+        fila_bin = QGridLayout()
+        fila_bin.setSpacing(6)
+        for col, (texto, slot) in enumerate([
+            ("⬚  Frontera",         self._mm_frontera),
+            ("⊛  Hit-or-Miss",      self._mm_hit_or_miss),
+            ("⇒  Adelgazamiento",   self._mm_adelgazamiento),
+            ("☆  Esqueleto",        self._mm_esqueleto),
+        ]):
+            b = QPushButton(texto)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(btn_style_mm)
+            b.clicked.connect(slot)
+            fila_bin.addWidget(b, col // 2, col % 2)
+        layout.addLayout(fila_bin)
+
+        layout.addWidget(self._hline())
+
+        # ══════════════════════════════════════════
+        # 03 · MORFOLOGÍA EN LATICCES
+        # ══════════════════════════════════════════
+        layout.addWidget(self._section_label("03  ·  MORFOLOGÍA EN LATICCES"))
+        layout.addWidget(self._make_sublabel("Requiere: GRIS"))
+
+        self.combo_ee_laticces = _combo_forma(layout)
+
+        layout.addWidget(self._make_sublabel("Tamaño del EE:"))
+        self.slider_mm_lat_kernel, self.lbl_mm_lat_kernel = _slider_row(
+            layout, None, None, (3, 31), 5, None, "Kernel: {0}×{0}")
+
+        # Gradiente: selector de tipo
+        layout.addWidget(self._make_sublabel("Tipo de Gradiente:"))
+        self.combo_gradiente = CenteredComboBox()
+        self.combo_gradiente.addItems([
+            "Simétrico  (dilatación − erosión)",
+            "Por dilatación  (dilatación − imagen)",
+            "Por erosión  (imagen − erosión)",
+        ])
+        self.combo_gradiente.setItemDelegate(DarkTextDelegate(self.combo_gradiente))
+        self.combo_gradiente.setStyleSheet(self._combo_style())
+        layout.addWidget(self.combo_gradiente)
+
+        btn_grad = QPushButton("∇  Gradiente Morfológico")
+        btn_grad.setCursor(Qt.PointingHandCursor)
+        btn_grad.setStyleSheet(btn_style_mm)
+        btn_grad.clicked.connect(self._mm_gradiente)
+        layout.addWidget(btn_grad)
+
+        layout.addWidget(self._make_sublabel("Top Hat / Bot Hat:"))
+        fila_hat = QHBoxLayout()
+        fila_hat.setSpacing(6)
+        btn_top = QPushButton("▲  Top Hat")
+        btn_top.setCursor(Qt.PointingHandCursor)
+        btn_top.setStyleSheet(btn_style_mm)
+        btn_top.clicked.connect(self._mm_top_hat)
+        btn_bot = QPushButton("▼  Bot Hat")
+        btn_bot.setCursor(Qt.PointingHandCursor)
+        btn_bot.setStyleSheet(btn_style_mm)
+        btn_bot.clicked.connect(self._mm_bot_hat)
+        fila_hat.addWidget(btn_top); fila_hat.addWidget(btn_bot)
+        layout.addLayout(fila_hat)
+
+        layout.addWidget(self._make_sublabel("Orden del filtro de suavizado:"))
+        self.combo_suavizado = CenteredComboBox()
+        self.combo_suavizado.addItems([
+            "Apertura → Cierre  (elimina sal, luego pimienta)",
+            "Cierre → Apertura  (elimina pimienta, luego sal)",
+        ])
+        self.combo_suavizado.setItemDelegate(DarkTextDelegate(self.combo_suavizado))
+        self.combo_suavizado.setStyleSheet(self._combo_style())
+        layout.addWidget(self.combo_suavizado)
+
+        btn_suav = QPushButton("≈  Suavizado Morfológico")
+        btn_suav.setCursor(Qt.PointingHandCursor)
+        btn_suav.setStyleSheet(btn_style_mm)
+        btn_suav.clicked.connect(self._mm_suavizado)
+        layout.addWidget(btn_suav)
+
+        layout.addStretch()
+        return scroll
+
+    # ══════════════════════════════════════════════════════════════
+    #  ACCIONES — MORFOLOGÍA BÁSICA
+    # ══════════════════════════════════════════════════════════════
+
+    def _mm_erosion(self):
+        if not self._check(): return
+        k = self.slider_mm_kernel.value()
+        i = self.slider_mm_iter.value()
+        f = "disco" if self.combo_ee_basica.currentIndex() == 0 else "cuadrado"
+        resp = procesadorImagen.erosion(self.imagen_metadata, kernel_size=k, iteraciones=i, forma=f)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _mm_dilatacion(self):
+        if not self._check(): return
+        k = self.slider_mm_kernel.value()
+        i = self.slider_mm_iter.value()
+        f = "disco" if self.combo_ee_basica.currentIndex() == 0 else "cuadrado"
+        resp = procesadorImagen.dilatacion(self.imagen_metadata, kernel_size=k, iteraciones=i, forma=f)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _mm_apertura(self):
+        if not self._check(): return
+        k = self.slider_mm_kernel.value()
+        i = self.slider_mm_iter.value()
+        f = "disco" if self.combo_ee_basica.currentIndex() == 0 else "cuadrado"
+        resp = procesadorImagen.apertura(self.imagen_metadata, kernel_size=k, iteraciones=i, forma=f)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _mm_cierre(self):
+        if not self._check(): return
+        k = self.slider_mm_kernel.value()
+        i = self.slider_mm_iter.value()
+        f = "disco" if self.combo_ee_basica.currentIndex() == 0 else "cuadrado"
+        resp = procesadorImagen.cierre(self.imagen_metadata, kernel_size=k, iteraciones=i, forma=f)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    # ══════════════════════════════════════════════════════════════
+    #  ACCIONES — MORFOLOGÍA BINARIA AVANZADA
+    # ══════════════════════════════════════════════════════════════
+
+    def _mm_frontera(self):
+        if not self._check(): return
+        k = self.slider_mm_bin_kernel.value()
+        f = "disco" if self.combo_ee_binaria.currentIndex() == 0 else "cuadrado"
+        resp = procesadorImagen.frontera(self.imagen_metadata, kernel_size=k, forma=f)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _mm_hit_or_miss(self):
+        if not self._check(): return
+        tipos = ["esquina", "punto_aislado", "extremo_linea"]
+        tipo = tipos[self.combo_hitmiss.currentIndex()]
+        resp = procesadorImagen.hit_or_miss(self.imagen_metadata, tipo_ee=tipo)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _mm_adelgazamiento(self):
+        if not self._check(): return
+        resp = procesadorImagen.adelgazamiento(self.imagen_metadata)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _mm_esqueleto(self):
+        if not self._check(): return
+        k = self.slider_mm_bin_kernel.value()
+        f = "disco" if self.combo_ee_binaria.currentIndex() == 0 else "cuadrado"
+        resp = procesadorImagen.esqueleto(self.imagen_metadata, kernel_size=k, forma=f)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    # ══════════════════════════════════════════════════════════════
+    #  ACCIONES — MORFOLOGÍA EN LATICCES
+    # ══════════════════════════════════════════════════════════════
+
+    def _mm_gradiente(self):
+        if not self._check(): return
+        k = self.slider_mm_lat_kernel.value()
+        f = "disco" if self.combo_ee_laticces.currentIndex() == 0 else "cuadrado"
+        tipos = ["simetrico", "dilatacion", "erosion"]
+        tipo = tipos[self.combo_gradiente.currentIndex()]
+        resp = procesadorImagen.gradiente_morfologico(self.imagen_metadata, tipo=tipo, kernel_size=k, forma=f)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _mm_top_hat(self):
+        if not self._check(): return
+        k = self.slider_mm_lat_kernel.value()
+        f = "disco" if self.combo_ee_laticces.currentIndex() == 0 else "cuadrado"
+        resp = procesadorImagen.top_hat(self.imagen_metadata, kernel_size=k, forma=f)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _mm_bot_hat(self):
+        if not self._check(): return
+        k = self.slider_mm_lat_kernel.value()
+        f = "disco" if self.combo_ee_laticces.currentIndex() == 0 else "cuadrado"
+        resp = procesadorImagen.bot_hat(self.imagen_metadata, kernel_size=k, forma=f)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
+    def _mm_suavizado(self):
+        if not self._check(): return
+        k = self.slider_mm_lat_kernel.value()
+        f = "disco" if self.combo_ee_laticces.currentIndex() == 0 else "cuadrado"
+        orden = "apertura_cierre" if self.combo_suavizado.currentIndex() == 0 else "cierre_apertura"
+        resp = procesadorImagen.suavizado_morfologico(self.imagen_metadata, kernel_size=k, forma=f, orden=orden)
+        self.imagen_metadata = resp["objeto"]
+        if resp["error"]: self._status(f"⚠  {resp['mensaje']}", C["warn"])
+        else:
+            self._mostrar_imagen(es_derivable=False)
+            self.calcular_histograma()
+            self._status(f"✔  {resp['mensaje']}")
+
     def _make_sublabel(self, text):
         """Label secundario para subtítulos dentro de una sección."""
         lbl = QLabel(text)
         lbl.setStyleSheet(f"color:{C['text2']}; font-size:11pt;")
         return lbl
+
+    def _combo_style(self):
+        """Estilo explícito para ComboBox y su dropdown — coherente con el tema del dashboard.
+        Se aplica directamente a cada combo para garantizar que Windows no use el estilo nativo."""
+        return f"""
+            QComboBox {{
+                background: {C['surface3']};
+                color: {C['text']};
+                border: 1px solid {C['border2']};
+                border-radius: 4px;
+                padding: 4px 14px;
+                font-size: 12pt;
+                min-height: 28px;
+            }}
+            QComboBox:focus {{ border-color: {C['accent']}; }}
+            QComboBox::drop-down {{ border: none; width: 20px; }}
+            QComboBox QAbstractItemView {{
+                background: {C['surface2']};
+                color: {C['text']};
+                border: 1px solid {C['accent']};
+                selection-background-color: {C['accent_dim']};
+                selection-color: {C['accent']};
+                outline: none;
+                padding: 4px 0px;
+            }}
+        """
 
     def _btn_style_accion(self):
         """Estilo homologado para botones de acción en ambas pestañas del sidebar."""
@@ -1257,7 +1689,7 @@ class VentanaDashboard(QMainWindow):
     def seleccionar_imagen(self):
         ruta, _ = QFileDialog.getOpenFileName(
             self, "Seleccionar imagen", self._leer_ultimo_directorio(),
-            "Imágenes (*.png *.jpg *.jpeg *.bmp *.tiff *.tif)"
+            "Imágenes (*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.gif *.webp *.pgm *.ppm)"
         )
         if not ruta: return
         self._guardar_ultimo_directorio(ruta)
@@ -1522,7 +1954,7 @@ class VentanaDashboard(QMainWindow):
         ruta = QFileDialog.getOpenFileName(
             self, "Seleccionar imagen secundaria (B)",
             self._leer_ultimo_directorio(),
-            "Imágenes (*.png *.jpg *.jpeg *.bmp *.tiff)"
+            "Imágenes (*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.gif *.webp *.pgm *.ppm)"
         )[0]
         if not ruta:
             return
@@ -1905,7 +2337,15 @@ class VentanaDashboard(QMainWindow):
         self.historial_estados.append(entrada)
         index = len(self.historial_estados) - 1
 
-        # Contenedor clickable usando ThumbWidget
+        self._build_thumb_widget(index, entrada)
+
+        QApplication.processEvents()
+        self.scroll_carrusel.horizontalScrollBar().setValue(
+            self.scroll_carrusel.horizontalScrollBar().maximum()
+        )
+
+    def _build_thumb_widget(self, index, entrada):
+        """Construye y agrega al carrusel el widget visual para una entrada del historial."""
         container = ThumbWidget(index)
         container.clicked.connect(self._restaurar_estado)
         col = QVBoxLayout(container)
@@ -1914,7 +2354,7 @@ class VentanaDashboard(QMainWindow):
 
         thumb_lbl = QLabel()
         thumb_lbl.setFixedSize(70, 56)
-        thumb_lbl.setPixmap(pixmap.scaled(66, 52, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        thumb_lbl.setPixmap(entrada.thumbnail.scaled(66, 52, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         thumb_lbl.setAlignment(Qt.AlignCenter)
         thumb_lbl.setStyleSheet(f"""
             border: 1px solid {C['border2']};
@@ -1923,7 +2363,29 @@ class VentanaDashboard(QMainWindow):
             padding: 2px;
         """)
 
-        caption = QLabel(etiqueta)
+        # Botón × en esquina superior derecha del thumbnail
+        btn_del = QPushButton("×", thumb_lbl)
+        btn_del.setFixedSize(16, 16)
+        btn_del.move(53, 1)   # 70 - 16 - 1, 1
+        btn_del.setCursor(Qt.PointingHandCursor)
+        btn_del.setStyleSheet(f"""
+            QPushButton {{
+                background: {C['surface']};
+                color: {C['warn']};
+                border: 1px solid {C['border2']};
+                border-radius: 3px;
+                font-size: 11pt;
+                font-weight: bold;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background: {C['warn']};
+                color: {C['bg']};
+            }}
+        """)
+        btn_del.clicked.connect(lambda _checked=False, i=index: self._eliminar_del_carrusel(i))
+
+        caption = QLabel(entrada.modelo)
         caption.setAlignment(Qt.AlignCenter)
         caption.setStyleSheet(f"color:{C['text3']}; font-size:10pt;")
 
@@ -1931,10 +2393,20 @@ class VentanaDashboard(QMainWindow):
         col.addWidget(caption)
         self.carrusel_layout.addWidget(container)
 
-        QApplication.processEvents()
-        self.scroll_carrusel.horizontalScrollBar().setValue(
-            self.scroll_carrusel.horizontalScrollBar().maximum()
-        )
+    def _eliminar_del_carrusel(self, index):
+        """Elimina una entrada del historial y reconstruye el carrusel."""
+        if index < 0 or index >= len(self.historial_estados): return
+        del self.historial_estados[index]
+        self._refrescar_carrusel()
+
+    def _refrescar_carrusel(self):
+        """Limpia y reconstruye todos los thumbnails del carrusel desde historial_estados."""
+        while self.carrusel_layout.count():
+            item = self.carrusel_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for i, entrada in enumerate(self.historial_estados):
+            self._build_thumb_widget(i, entrada)
 
     def _restaurar_estado(self, index):
         """Restaura la imagen al estado guardado en el carrusel. No agrega al historial."""
