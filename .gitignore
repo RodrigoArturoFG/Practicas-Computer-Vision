@@ -15,6 +15,7 @@ ENV/
 # --- Datos y Recursos ---
 # Ignora resultados de salida para no llenar el repo de fotos procesadas
 **/resources/output/
+**/salidas
 # Si las datasets son muy pesados, ignorar la entrada también:
 # **/resources/input/
 # Caché local de la aplicación
