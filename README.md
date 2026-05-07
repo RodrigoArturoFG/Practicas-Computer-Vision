@@ -133,8 +133,8 @@ python analisis_imagen_dashboard.py
 cd Practica-4/scripts
 python analisis_imagen_dashboard.py
 
-# Practica 4 
-cd Practica-4/scripts
+# Practica 5
+cd Practica-5/scripts
 python analisis_imagen_dashboard.py
 ```
 
@@ -174,6 +174,22 @@ Practicas-Computer-Vision/
 │       ├── modelo_imagen.py
 │       ├── modelo_historial_imagen.py
 │       └── config.py
+├── Practica-5/
+│   ├── scripts/
+│   │   ├── analisis_imagen_dashboard.py
+│   │   ├── controlador_imagen.py
+│   │   ├── modelo_imagen.py
+│   │   ├── modelo_historial_imagen.py
+│   │   ├── config.py
+│   │   ├── practica_frecuencia_ISC.py
+│   │   └── extraer_metricas.py
+│   ├── data/                              # Imagenes de prueba HIPR2
+│   ├── resources/
+│   │   ├── input/
+│   │   └── output/
+│   ├── salidas/                           # Resultados del script CLI
+│   ├── reporte/
+│   └── README.md
 ├── requirements.txt
 └── README.md
 ```
@@ -217,3 +233,14 @@ Practicas-Computer-Vision/
 - Las operaciones morfologicas **solo aplican a imagenes BINARIO o GRIS** (monocanal). Aplicarlas sobre RGB, HSV u otros modelos multicanal no tiene sentido semantico y es rechazado por el controlador.
 - Las imagenes con el objeto en negro sobre fondo blanco requieren aplicar **NOT** antes de las operaciones morfologicas, ya que OpenCV opera sobre pixeles blancos (255) como primer plano.
 - Las imagenes de prueba recomendadas provienen de la base de datos HIPR2 de la Universidad de Edimburgo: https://homepages.inf.ed.ac.uk/rbf/HIPR2/images/
+
+### Practica 5 — Transformadas de Frecuencia (FFT y DCT)
+
+- El dashboard agrega un nuevo tab **"ANÁLISIS FRECUENCIAL"** al mismo dashboard multi-practica de las practicas 2-4.
+- La seccion **FFT** permite aplicar filtros pasa-bajas y pasa-altas con cuatro tipos de mascara: Ideal, Gaussiano, Butterworth y Notch. El filtro Notch elimina frecuencias puntuales del espectro, util para ruido periodico.
+- La seccion **DCT** implementa compresion tipo JPEG mediante cuantizacion en bloques 8×8 con factor de calidad ajustable (`q_factor`), y una extension **Top-K** que preserva solo los k coeficientes de mayor magnitud por bloque.
+- Los resultados se muestran en una **vista multiple**: 3 imagenes para FFT (Original | Espectro de Magnitud | Imagen Filtrada) y 2 para DCT cuantizacion (Original | Reconstruida con PSNR). El modo Top-K produce un grid 2x3 con los distintos valores de k.
+- El espectro de magnitud se obtiene como `log(1 + |FFT|)` y se normaliza min-max a uint8 para visualizacion; sin esta normalizacion el espectro apareceria completamente negro.
+- La calidad de la compresion DCT se mide con **PSNR** (Peak Signal-to-Noise Ratio). Valores de referencia: >40 dB excelente, 30-40 dB buena calidad, <20 dB baja calidad.
+- Las transformadas FFT y DCT se implementan con `numpy.fft` y operaciones matriciales de NumPy puro, sin librerias adicionales.
+- Los resultados se guardan en subcarpetas `{nombre_imagen}_{timestamp}/` dentro del directorio que elija el usuario. La opcion **Multi-Vista** guarda el collage completo y el espectro como archivos separados.

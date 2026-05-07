@@ -4,343 +4,256 @@
 
 **Institución:** ESCOM - Instituto Politécnico Nacional
 **Estudiante:** Rodrigo Arturo Fernández González
-**Matricula:**   2009630357
-**Carrera:**     Ingeniería en Sistemas Computacionales 
-**Grupo:** 7CM3  
-**Asignatura:** Análisis de Imágenes  
-**Profesora:** M. en C. María Elena Cruz Meza  
+**Matrícula:** 2009630357
+**Carrera:** Ingeniería en Sistemas Computacionales
+**Grupo:** 7CM3
+**Asignatura:** Análisis de Imágenes
+**Profesora:** M. en C. María Elena Cruz Meza
 
 ---
 
-## 📅 Fecha - Abril 2026
+## Descripción
+
+Esta práctica integra el análisis frecuencial en el dashboard multi-práctica **Vision Lab**.
+Se implementan filtros en el dominio de la frecuencia (FFT) y compresión por transformada discreta del coseno (DCT), con una interfaz interactiva que permite explorar los resultados de forma visual.
+
+El tab **"ANÁLISIS FRECUENCIAL"** se agrega al dashboard que ya incluía las prácticas 1–4.
 
 ---
 
-## 📋 Tabla de Contenidos
-
-- [Estructura del Proyecto](#-estructura-del-proyecto)
-- [Objetivos](#-objetivos)
-- [Dependencias](#-dependencias)
-- [Inicio Rápido](#-inicio-rápido)
-- [Experimentos](#-experimentos-incluidos)
-- [Comandos Detallados](#-comandos-detallados)
-- [Flujo de Trabajo](#-flujo-de-trabajo-completo)
-- [Formato de Resultados](#-formato-de-resultados)
-- [Tips y Troubleshooting](#-tips-y-troubleshooting)
-- [Referencias](#-referencias)
-
----
-
-## 📁 Estructura del Proyecto
+## Estructura del Proyecto
 
 ```
 Practica-5/
 ├── scripts/
-│   ├── practica_frecuencia_ISC.py    # Script principal con extensiones
-│   └── extraer_metricas.py                     # Generador de tablas CSV/MD
-├── data/                                       # Imágenes de entrada (HIPR2)
-│   ├── cam1.gif, pcb2.gif, fce5.gif, ape1.gif
-│   └── ... (12 imágenes en total)
-├── salidas/                                    # TODOS los resultados aquí
-│   ├── 01_ideal_low_005_cam1/
-│   │   ├── fft_filtrado.png
-│   │   └── dct_reconstruccion.png
-│   ├── 02_ideal_low_015_cam1/
-│   ├── ... (20 subcarpetas)
-│   └── tabla_resultados_YYYYMMDD_HHMM.csv     # Auto-generado
+│   ├── analisis_imagen_dashboard.py   # Dashboard principal (GUI PyQt5)
+│   ├── controlador_imagen.py          # Backend con toda la lógica de procesamiento
+│   ├── modelo_imagen.py               # Entidad de datos de imagen activa
+│   ├── modelo_historial_imagen.py     # Entidad de datos del historial/carrusel
+│   ├── config.py                      # Tema visual y constantes
+│   ├── extraer_metricas.py            # Script auxiliar: genera tabla CSV/MD de resultados
+│   └── practica_frecuencia_ISC.py     # Script CLI: experimentos por lote
+├── data/                              # Imágenes de prueba (formato HIPR2)
+│   ├── cam1.gif, pcb2.gif, fce5.gif, ape1.gif, art4.gif, art8.gif
+│   └── ... (16 imágenes en total)
+├── resources/
+│   ├── input/                         # Copia de imágenes de prueba para el dashboard
+│   └── output/                        # Resultados exportados por el dashboard
+│       └── {nombre_imagen}_{timestamp}/
+│           ├── imagen_GRIS_original.png
+│           ├── imagen_GRIS_histograma.png
+│           ├── imagen_fft_{timestamp}_multiview.png
+│           └── imagen_fft_{timestamp}_espectro.png
+├── salidas/                           # Resultados del script CLI por lote
 ├── reporte/
-│   └── practica5-TF.docx                       # Documento final
-├── ejecutar_practica5.bat             # Ejecuta todo
-├── TABLA_EXPERIMENTOS_PRACTICA5.md             # Referencia de experimentos
-└── README.md                                   # Este archivo
+│   ├── Guia_Practica_Transformaciones_Frecuencia_AI.pdf
+│   ├── Plantilla_Reporte_Practica_Frecuencia.docx
+│   └── TABLA_EXPERIMENTOS_PRACTICA5.pdf
+├── ejecutar_practica5.bat             # Ejecuta todos los experimentos CLI de una vez
+└── README.md                          # Este archivo
 ```
 
 ---
 
-## 🎯 Objetivos
+## Ejecución
 
-1. **FFT:** Analizar contenido frecuencial y diseñar filtros (Ideal, Gaussiano, Butterworth)
-2. **DCT:** Implementar compresión tipo JPEG con cuantización
-3. **Métricas:** Evaluar calidad con PSNR
-4. **Extensiones (Trabajo Autónomo):**
-   - Filtro Notch para eliminar frecuencias específicas
-   - Selección Top-K de coeficientes DCT por energía
-
----
-
-## 🔧 Dependencias
+### Dashboard interactivo (recomendado)
 
 ```bash
-pip install numpy matplotlib Pillow
+cd "Practica-5/scripts"
+python analisis_imagen_dashboard.py
 ```
 
-**Nota:** Este proyecto **NO** usa OpenCV, solo NumPy, Matplotlib y Pillow (PIL).
+El dashboard incluye las prácticas 1 a 5 unificadas. Para usar el análisis frecuencial:
 
----
+1. Cargar imagen (botón "Cargar Imagen")
+2. Convertir a escala de grises: tab **Preprocesamiento** → "Escala de Grises"
+3. Ir al tab **"ANÁLISIS FRECUENCIAL"**
+4. Aplicar FFT o DCT con los controles disponibles
 
-## 🚀 Inicio Rápido
+### Script CLI (experimentos por lote)
 
-### **1. Ejecutar todos los experimentos (automático)**
-```cmd
+```bash
+cd "Practica-5/scripts"
+
+# Filtro FFT (Butterworth lowpass)
+python practica_frecuencia_ISC.py --imagen ../data/cam1.gif --filtro butterworth --tipo lowpass --cutoff 0.15 --orden 2 --salidas ../salidas/prueba
+
+# Compresión DCT (cuantización JPEG)
+python practica_frecuencia_ISC.py --imagen ../data/fce5.gif --dct_q 0.5 --salidas ../salidas/prueba
+
+# Filtro Notch
+python practica_frecuencia_ISC.py --modo notch --imagen ../data/pcb2.gif --notch_centros "60,60;-60,-60" --notch_radio 10 --salidas ../salidas/prueba
+
+# DCT Top-K
+python practica_frecuencia_ISC.py --modo topk --imagen ../data/ape1.gif --salidas ../salidas/prueba
+
+# Todos los experimentos de una vez
 ejecutar_practica5.bat
 ```
 
-**¿Qué hace?**
-- Ejecuta 20 experimentos (13 FFT + 7 DCT)
-- Guarda resultados en `salidas/` con subcarpetas organizadas
-- Al final pregunta si generar tabla de métricas
-- Abre la carpeta de resultados
+### Generar tabla comparativa de métricas
 
-**Tiempo estimado:** 5-10 minutos
-
-### **2. Generar tabla de métricas**
-```cmd
-python scripts/extraer_metricas.py --carpeta salidas
+```bash
+python extraer_metricas.py --carpeta ../salidas
 ```
 
-**Resultado:**
-- `salidas/tabla_resultados_YYYYMMDD_HHMM.csv` (para Excel)
-- `salidas/tabla_resultados_YYYYMMDD_HHMM.md` (visualización)
+Produce un archivo `.csv` y un `.md` con las métricas de todos los experimentos guardados en `salidas/`.
 
 ---
 
-## 📊 Experimentos Incluidos
+## Funcionalidades del Dashboard (tab "ANÁLISIS FRECUENCIAL")
 
-### **PARTE A: Filtrado FFT (13 experimentos)**
+### Sección FFT — Filtrado en Frecuencia
 
-| Imagen | Filtros | Configuraciones |
-|--------|---------|-----------------|
-| **cam1.gif** | Ideal, Gaussiano, Butterworth | Lowpass (cutoff=0.05, 0.15) + Highpass (cutoff=0.05) |
-| **pcb2.gif** | Ideal, Gaussiano, Butterworth | Lowpass (cutoff=0.1) + **Notch** (extensión) |
+| Control | Descripción |
+|---|---|
+| Tipo de filtro | Ideal / Gaussiano / Butterworth |
+| Modo | Lowpass (pasa-bajas) / Highpass (pasa-altas) |
+| Cutoff | Frecuencia de corte normalizada (0.01 – 0.50) |
+| Orden Butterworth | 2 / 3 / 4 |
+| Botón "Aplicar Filtro FFT" | Calcula FFT, aplica máscara, reconstruye imagen |
 
-**Total:** 9 experimentos con cam1.gif + 4 con pcb2.gif
+Al aplicar, se muestra una **vista múltiple con 3 imágenes horizontales**:
 
-### **PARTE B: Compresión DCT (7 experimentos)**
+```
+[ Original ]  |  [ Espectro de Magnitud ]  |  [ Imagen Filtrada ]
+```
 
-| Método | Imágenes | Parámetros |
-|--------|----------|------------|
-| **Cuantización JPEG** | fce5.gif | q_factor = 0.3, 0.5, 0.8, 1.0 |
-| **Top-K** (extensión) | ape1.gif | k = 5, 10, 20, 30, 40 |
-| **Comparación** | blb1.gif, fce1.gif | q_factor = 0.5 |
+### Sección Notch — Rechazo de Frecuencias Específicas (extensión)
 
-**Total:** 20 experimentos automatizados
+Permite eliminar frecuencias puntuales del espectro, útil para ruido periódico.
+
+| Control | Descripción |
+|---|---|
+| Centros | Coordenadas en formato `u1,v1;u2,v2` |
+| Radio | Tamaño del área de rechazo (5 – 50 px) |
+| Botón "Aplicar Filtro Notch" | Aplica máscara Notch simétrica |
+
+### Sección DCT — Compresión
+
+#### Modo: Cuantización JPEG
+
+| Control | Descripción |
+|---|---|
+| q_factor | Factor de calidad (0.1 = máxima compresión, 2.0 = mínima) |
+| Botón "Aplicar DCT" | Aplica cuantización en bloques 8×8 |
+
+Resultado: vista con 2 imágenes + PSNR en dB.
+
+```
+[ Original ]  |  [ Reconstruida — PSNR: XX.XX dB ]
+```
+
+#### Modo: Top-K (extensión)
+
+Selecciona los k coeficientes DCT de mayor magnitud por bloque 8×8.
+
+| Control | Descripción |
+|---|---|
+| Checkboxes k | Valores disponibles: 5, 10, 20, 30, 40 |
+| Botón "Aplicar DCT" | Genera una reconstrucción por cada k marcado |
+
+Resultado: grid 2×3 con cada valor de k, su PSNR y ratio de compresión.
 
 ---
 
-## 💻 Comandos Detallados
+## Funcionalidades del Dashboard (generales)
 
-### **Experimentos Individuales**
+### Historial / Carrusel
 
-#### FFT - Filtro Butterworth:
-```cmd
-python scripts/practica_frecuencia_ISC.py --imagen data/cam1.gif --filtro butterworth --tipo lowpass --cutoff 0.15 --orden 2 --salidas salidas/prueba_butter
-```
+Cada resultado de FFT o DCT se agrega automáticamente al carrusel inferior.
+Al hacer click en una miniatura se restaura la vista: imagen individual o multi-vista según corresponda.
 
-#### DCT - Cuantización:
-```cmd
-python scripts/practica_frecuencia_ISC.py --imagen data/fce5.gif --dct_q 0.5 --salidas salidas/prueba_dct
-```
+### Auto-guardado
 
-#### Filtro Notch (Extensión):
-```cmd
-python scripts/practica_frecuencia_ISC.py --modo notch --imagen data/pcb2.gif --notch_centros "60,60;-60,-60" --notch_radio 10 --salidas salidas/prueba_notch
-```
+Checkbox **"Guardar automáticamente"**: al aplicar cualquier transformada frecuencial, los archivos se exportan a `resources/output/` sin necesidad de usar el botón de guardado manual.
 
-#### DCT Top-K (Extensión):
-```cmd
-python scripts/practica_frecuencia_ISC.py --modo topk --imagen data/ape1.gif --salidas salidas/prueba_topk
-```
+### Guardado manual
 
-### **Tabla Comparativa Automática**
-```cmd
-python scripts/practica_frecuencia_ISC.py --modo tabla_comparativa --imagen data/cam1.gif --salidas salidas/analisis
-```
+Botón **"Guardar Imagen"** → selección de carpeta → crea subcarpeta `{nombre_imagen}_{timestamp}/`.
 
-### **Ver Ayuda**
-```cmd
-python scripts/extraer_metricas.py --help
-python scripts/practica_frecuencia_ISC.py --help
-```
+Opciones de guardado (checkboxes):
 
----
+| Checkbox | Archivo generado |
+|---|---|
+| (siempre) | `{nombre}_original.png` |
+| Histograma | `{nombre}_histograma.png` |
+| Canales | `{nombre}_canal_R/G/B.png` o `canal_GRIS.png` |
+| Conteo de objetos | `{nombre}_conteo_v4.png`, `_v8.png` |
+| Multi-Vista Frecuencial | `{nombre}_multiview.png` + `_espectro.png` |
 
-## 🔄 Flujo de Trabajo Completo
+El checkbox Multi-Vista solo se activa cuando hay un resultado frecuencial vigente en pantalla.
 
-### **Paso 1: Preparar el Ambiente**
-```cmd
-cd Practica-5
-# Verificar que existan las carpetas: scripts/, data/, salidas/, reporte/
-```
+### Paneles colapsables
 
-### **Paso 2: Descargar Imágenes**
-Descarga manualmente desde [HIPR2](http://homepages.inf.ed.ac.uk/rbf/HIPR2/alphlib.htm):
+Los paneles izquierdo (controles) y derecho (información) tienen botones `<` / `>` para colapsar/expandir, ampliando el área del visor central.
 
-**Para FFT:** cam1.gif, pcb2.gif, ape1.gif, art4.gif, art8.gif, air1.gif, mon1.gif  
-**Para DCT:** fce5.gif, fce1.gif, fce4.gif, ape1.gif, blb1.gif, ply1.gif
+### Imágenes responsivas
 
-Colócalas en `data/`
-
-### **Paso 3: Ejecutar Experimentos**
-```cmd
-ejecutar_practica5.bat
-```
-- Responde **"S"** cuando pregunte si generar tabla de métricas
-
-### **Paso 4: Revisar Resultados**
-```cmd
-explorer salidas
-```
-
-Verás 20 subcarpetas, cada una con:
-- `fft_filtrado.png` (visualización FFT)
-- `dct_reconstruccion.png` (visualización DCT con PSNR)
-
-### **Paso 5: Completar Tabla en Excel**
-1. Abre `salidas/tabla_resultados_YYYYMMDD_HHMM.csv` en Excel
-2. Para **DCT**: Copia valores PSNR de las figuras
-3. Para **FFT**: Agrega observaciones visuales:
-   - Ringing (sí/no)
-   - Nivel de difuminado
-   - Calidad de bordes
-
-### **Paso 6: Crear Reporte Final**
-Usa `Plantilla_Reporte_Practica_Frecuencia.docx`:
-- Agregar portada estilo IPN/ESCOM (logos incluidos en proyecto)
-- Incluir figuras seleccionadas de cada experimento
-- Copiar tabla de resultados
-- Responder análisis crítico:
-  - ¿Qué revela el espectro?
-  - ¿Qué filtro fue más efectivo?
-  - ¿Ventajas de DCT?
-  - ¿Limitaciones observadas?
-- Escribir conclusiones
-
-Guardar como: `reporte/practica5-TF.docx`
+La vista múltiple frecuencial se redistribuye automáticamente al redimensionar la ventana o mover los separadores.
 
 ---
 
-## 📈 Formato de Resultados
+## Dependencias
 
-### **Timestamp Automático**
-Formato: `YYYYMMDD_HHMM`
+Además de las dependencias del proyecto base (`opencv-python`, `numpy`, `matplotlib`, `scipy`, `PyQt5`), esta práctica no requiere dependencias adicionales.
 
-**Ejemplos:**
-- `20260429_1430` = 29 abril 2026, 14:30
-- `20260430_0915` = 30 abril 2026, 09:15
-
-**Ventajas:**
-- Ordenamiento cronológico automático
-- Compatible Windows/Linux/Mac
-- Sin caracteres problemáticos
-
-### **Tabla de Métricas Generada**
-
-La tabla CSV contiene:
-- Filtro (Ideal, Gaussiano, Butterworth, DCT, Notch, Top-K)
-- Parámetros (cutoff, orden, q_factor, k)
-- Imagen utilizada
-- PSNR (dB) - para DCT
-- Observaciones - para FFT
+Los filtros FFT y la DCT se implementan con `numpy.fft` y operaciones matriciales de NumPy puro, sin librerías externas adicionales.
 
 ---
 
-## 💡 Tips y Troubleshooting
+## Imágenes de Prueba
 
-### **Si algo falla:**
-```cmd
-# Ver archivos generados
-dir salidas /s
+Las imágenes recomendadas provienen de la base de datos HIPR2 (University of Edinburgh):
+http://homepages.inf.ed.ac.uk/rbf/HIPR2/alphlib.htm
 
-# Regenerar solo la tabla
-python scripts/extraer_metricas.py --carpeta salidas --salida tabla_nueva
-```
-
-### **Ejecutar solo algunos experimentos:**
-Edita `ejecutar_practica5.bat` y comenta con `REM` las líneas que no necesites.
-
-### **Personalizar tabla de salida:**
-```cmd
-python scripts/extraer_metricas.py --carpeta salidas --salida mi_analisis
-```
-Genera: `mi_analisis_YYYYMMDD_HHMM.csv`
-
-### **Valores PSNR de Referencia (DCT):**
-- **PSNR > 40 dB:** Excelente (pérdida imperceptible)
-- **PSNR 30-40 dB:** Buena calidad
-- **PSNR 20-30 dB:** Aceptable (pérdida visible)
-- **PSNR < 20 dB:** Mala calidad
-
-### **Observaciones FFT (no usa PSNR):**
-Documenta:
-- Presencia de ringing (Ideal lo tiene, Gaussiano no)
-- Nivel de suavizado/difuminado
-- Preservación de bordes
-- Artefactos visuales
+| Imagen | Uso recomendado |
+|---|---|
+| `cam1.gif` | FFT comparativa de filtros (lowpass/highpass) |
+| `pcb2.gif` | Filtro Notch (ruido periódico en circuito) |
+| `art8.gif` | FFT con patrones geométricos claros |
+| `fce5.gif` | DCT cuantización (imagen facial) |
+| `ape1.gif` | DCT Top-K |
+| `grass1_gris.png`, `rocks1_gris.png` | Texturas para análisis frecuencial |
 
 ---
 
-## 🎓 Extensiones Implementadas
+## Valores de Referencia (PSNR)
 
-### **1. Filtro Notch (Rechazo de Banda)**
-Elimina frecuencias específicas del espectro. Útil para:
-- Ruido periódico de escaneo
-- Patrones de moiré
-- Interferencias en circuitos (pcb2.gif)
-
-**Cómo funciona:**
-- Define centros de rechazo en coordenadas (u, v)
-- Rechaza automáticamente puntos simétricos
-- Radio ajustable de rechazo
-
-### **2. DCT Top-K Coeficientes**
-Compresión adaptativa por energía:
-- Preserva solo los k coeficientes de mayor magnitud
-- Alternativa a cuantización uniforme
-- Muestra relación energía-calidad
-
-**Comparación:**
-- k=5: Solo componentes principales
-- k=10: Más detalles preservados
-- k=20: Alta fidelidad
-- k=64: Sin compresión (todos los coeficientes)
+| Rango | Calidad |
+|---|---|
+| > 40 dB | Excelente — pérdida imperceptible |
+| 30 – 40 dB | Buena calidad |
+| 20 – 30 dB | Aceptable — pérdida visible |
+| < 20 dB | Baja calidad |
 
 ---
 
-## 📚 Referencias
+## Algoritmos Implementados (controlador_imagen.py)
+
+### FFT
+
+- `fft2_imagen_frecuencial(img)` — calcula FFT 2D y espectro de magnitud log-normalizado
+- `crear_mascara_fft(shape, cutoff, tipo_filtro, modo)` — máscaras Ideal, Gaussiana, Butterworth
+- `crear_mascara_notch(shape, centros, radio)` — máscara Notch con puntos simétricos
+- `aplicar_filtro_fft_frecuencial(...)` — función principal; valida imagen monocanal y retorna `{imagen_original, espectro_magnitud, mascara, imagen_filtrada}`
+
+### DCT
+
+- `_dct_matrix(N=8)` / `_C8` — matriz DCT 8×8 precalculada
+- `_Q_JPEG` — tabla de cuantización JPEG estándar
+- `_dct_bloque_2d(b)` / `_idct_bloque_2d(D)` — transformadas por bloques 8×8
+- `_pad_a_multiplo(img, N=8)` — padding a múltiplo de 8
+- `_calcular_psnr(original, reconstruida)` — Peak Signal-to-Noise Ratio
+- `aplicar_dct_cuantizacion_frecuencial(img, q_factor)` — cuantización JPEG por bloques
+- `aplicar_dct_topk_frecuencial(img, k_values)` — selección Top-K por energía
+
+---
+
+## Referencias
 
 - Gonzalez, R. C., & Woods, R. E. (2018). *Digital Image Processing* (4th ed.). Pearson.
-- HIPR2 - Hypermedia Image Processing Reference. University of Edinburgh.  
+- HIPR2 — Hypermedia Image Processing Reference. University of Edinburgh.
   http://homepages.inf.ed.ac.uk/rbf/HIPR2/
-- Material didáctico: Unidad 2 - Transformadas de Frecuencia
-- Documentación adicional en: `TABLA_EXPERIMENTOS_PRACTICA5.md`
-
----
-
-## 📦 Entregables
-
-1. ✅ **Código fuente:** Scripts en `scripts/`
-2. ✅ **Resultados:** 20 experimentos en `salidas/`
-3. ✅ **Tabla de métricas:** CSV y Markdown auto-generados
-4. ✅ **Reporte académico:** `reporte/practica5-TF.docx` con:
-   - Portada IPN/ESCOM
-   - Desarrollo con figuras
-   - Tabla de resultados
-   - Análisis crítico
-   - Conclusiones
-
----
-
-## 🎯 Resumen de Comandos Clave
-
-| Acción | Comando |
-|--------|---------|
-| Ejecutar todos los experimentos | `ejecutar_practica5.bat` |
-| Generar tabla de métricas | `python scripts/extraer_metricas.py --carpeta salidas` |
-| Ver ayuda del extractor | `python scripts/extraer_metricas.py --help` |
-| Experimento individual FFT | `python scripts/practica_frecuencia_ISC.py --imagen data/cam1.gif --filtro butterworth --tipo lowpass --cutoff 0.15 --orden 2 --salidas salidas/test` |
-| Experimento individual DCT | `python scripts/practica_frecuencia_ISC.py --imagen data/fce5.gif --dct_q 0.5 --salidas salidas/test` |
-| Modo Notch | `python scripts/practica_frecuencia_ISC.py --modo notch --imagen data/pcb2.gif --notch_centros "60,60;-60,-60" --salidas salidas/test` |
-| Modo Top-K | `python scripts/practica_frecuencia_ISC.py --modo topk --imagen data/ape1.gif --salidas salidas/test` |
-
----
-
+- Material didáctico: Unidad 2 — Transformadas de Frecuencia, Análisis de Imágenes, ESCOM-IPN.
